@@ -1,0 +1,7 @@
+# Install PyTorch separately first so the CUDA wheel source can be selected (see README).
+torch>=2.4
+torchvision>=0.19
+ultralytics>=8.3,<9
+opencv-python>=4.10,<5
+PyYAML>=6.0,<7
+pytest>=8,<9

@@ -1,0 +1,9 @@
+model: models/yolo11n.pt
+confidence: 0.35
+iou: 0.45
+image_size: 640
+# COCO IDs: car=2, motorcycle=3, bus=5, truck=7.
+# Motorcycle is disabled by default because the current goal is road vehicles.
+vehicle_class_ids: [2, 5, 7]
+crop_padding: 0.05
+save_annotated: true
