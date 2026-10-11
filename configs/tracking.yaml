@@ -1,0 +1,38 @@
+tracker: configs/bytetrack_vehicleai.yaml
+tracking_confidence: 0.10
+agnostic_nms: true
+max_selected_per_track: 5
+min_crop_width: 64
+min_crop_height: 48
+min_area_ratio: 0.001
+min_sharpness: 35.0
+min_frame_difference: 0.06
+thumbnail_size: 64
+
+diagnostics:
+  short_track_max_detections: 4
+  min_continuity: 0.50
+
+association:
+  enabled: true
+  max_gap_frames: 90
+  max_spatial_distance: 0.30
+  min_scale_similarity: 0.35
+  suspected_score: 0.68
+  auto_merge_score: 0.86
+  min_auto_appearance: 0.72
+
+false_positive_filter:
+  enabled: true
+  min_track_detections: 5
+  min_continuity: 0.35
+  min_mean_confidence: 0.40
+  interior_min_area_ratio: 0.25
+  interior_max_horizontal_motion: 0.015
+  secondary_verification:
+    enabled: true
+    model: models/yolo11n-cls.pt
+    positive_threshold: 0.25
+    negative_threshold: 0.05
+    max_samples_per_track: 3
+    fallback: metadata_only

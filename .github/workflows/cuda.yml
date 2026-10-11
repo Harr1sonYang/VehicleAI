@@ -1,0 +1,22 @@
+name: CUDA checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-tests:
+    runs-on: [self-hosted, windows, x64, cuda]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install project without replacing runner CUDA PyTorch
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -e . --no-deps
+      - name: Run CUDA-only tests
+        run: python -m pytest -m cuda

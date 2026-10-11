@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VehicleAI 数据集审核</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='review.css') }}">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>VehicleAI 数据集审核</h1>
+      <p class="warning">目标标签仅表示目标车身／外观代际，不代表警用或执法用途。</p>
+    </div>
+    <div id="progress" class="progress">正在载入…</div>
+  </header>
+
+  <section class="filters" aria-label="筛选器">
+    <label>审核状态
+      <select id="status-filter">
+        <option value="unreviewed">未审核</option>
+        <option value="all">全部</option>
+        <option value="reviewed">已审核</option>
+      </select>
+    </label>
+    <label>候选类别
+      <select id="hint-filter"><option value="">全部</option></select>
+    </label>
+    <label>最终标签
+      <select id="label-filter"><option value="">全部</option></select>
+    </label>
+    <label>来源提供方
+      <select id="provider-filter"><option value="">全部</option></select>
+    </label>
+    <label>候选质量
+      <select id="candidate-status-filter">
+        <option value="reviewable">可审核（默认）</option>
+        <option value="accepted">已通过自动筛选</option>
+        <option value="suspected_false_positive">疑似误检</option>
+        <option value="filtered">已过滤</option>
+        <option value="all">全部</option>
+      </select>
+    </label>
+    <label>排序
+      <select id="sort-filter">
+        <option value="default">默认</option>
+        <option value="uncertain_first">AI 不确定优先</option>
+      </select>
+    </label>
+  </section>
+
+  <main>
+    <section class="viewer">
+      <a id="full-image-link" target="_blank" rel="noopener" title="点击查看原图">
+        <img id="candidate-image" alt="当前候选图片">
+      </a>
+      <div id="empty" class="empty" hidden>当前筛选条件下没有待审核图片。</div>
+    </section>
+
+    <aside>
+      <h2 id="filename">—</h2>
+      <dl id="metadata">
+        <dt>候选类别</dt><dd data-field="class_hint">—</dd>
+        <dt>当前标签</dt><dd data-field="label">未审核</dd>
+        <dt>来源提供方</dt><dd data-field="provider">—</dd>
+        <dt>搜索词</dt><dd data-field="query">—</dd>
+        <dt>尺寸</dt><dd data-field="dimensions">—</dd>
+        <dt>来源</dt><dd data-field="source">—</dd>
+        <dt>来源 ID</dt><dd data-field="source_id">—</dd>
+        <dt>来源视频</dt><dd data-field="source_video">—</dd>
+        <dt>帧号</dt><dd data-field="frame_number">—</dd>
+        <dt>轨迹 ID</dt><dd data-field="track_id">—</dd>
+        <dt>车辆组</dt><dd data-field="vehicle_group_id">—</dd>
+        <dt>组内轨迹</dt><dd data-field="group_track_ids">—</dd>
+        <dt>关联状态</dt><dd data-field="association_status">—</dd>
+        <dt>疑似重复</dt><dd data-field="suspected_duplicate_track_ids">—</dd>
+        <dt>候选质量</dt><dd data-field="candidate_status">—</dd>
+        <dt>过滤原因</dt><dd data-field="candidate_filter_reasons">—</dd>
+      </dl>
+      <a id="source-link" class="source-link" target="_blank" rel="noopener noreferrer" hidden>打开来源页面</a>
+      <section class="ai-panel">
+        <h3>AI 预标注（仅供审核）</h3>
+        <dl>
+          <dt>推荐类别</dt><dd data-field="ai_recommendation">—</dd>
+          <dt>余弦相似度</dt><dd data-field="ai_similarity">—</dd>
+          <dt>Top-3</dt><dd data-field="ai_top3">—</dd>
+        </dl>
+        <a id="ai-reference-link" target="_blank" rel="noopener" hidden>
+          <img id="ai-reference-image" alt="最相似人工参考图片">
+          <span>查看最相似人工参考图片</span>
+        </a>
+        <button id="accept-ai" disabled>一键接受 AI 推荐</button>
+        <p>分数是相似度，不是概率；接受后才会写入人工标注。</p>
+      </section>
+      <section class="group-editor">
+        <label>人工车辆组 Track ID（逗号分隔）
+          <input id="group-track-ids" type="text" inputmode="numeric">
+        </label>
+        <div>
+          <button id="confirm-group">确认合并</button>
+          <button id="split-track">拆分当前 Track</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <section class="actions" aria-label="标注操作">
+    <button data-label="charger_target"><kbd>1</kbd> Charger 目标</button>
+    <button data-label="explorer_target"><kbd>2</kbd> Explorer / PIU 目标</button>
+    <button data-label="durango_target"><kbd>3</kbd> Durango 目标</button>
+    <button data-label="other"><kbd>4</kbd> 其他车辆</button>
+    <button data-label="unknown"><kbd>5</kbd> 不确定</button>
+    <button data-label="unusable"><kbd>6</kbd> 不可用</button>
+  </section>
+  <section class="navigation">
+    <button id="previous"><kbd>←</kbd> 上一张</button>
+    <button id="skip"><kbd>S</kbd> 跳过</button>
+    <button id="next"><kbd>→</kbd> 下一张</button>
+    <span id="message" role="status"></span>
+  </section>
+
+  <script src="{{ url_for('static', filename='review.js', v=6) }}"></script>
+</body>
+</html>
