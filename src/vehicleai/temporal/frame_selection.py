@@ -12,6 +12,45 @@ import numpy as np
 from vehicleai.tracking.tracker import TrackedDetection
 
 
+DEFAULT_CLASSIFICATION_MIN_WIDTH = 128
+DEFAULT_CLASSIFICATION_MIN_HEIGHT = 96
+DEFAULT_CLASSIFICATION_MIN_AREA_RATIO = 0.0025
+DEFAULT_CLASSIFICATION_MIN_SHARPNESS = 35.0
+
+
+def assess_classification_usability(
+    *,
+    width: int,
+    height: int,
+    area_ratio: float | None,
+    sharpness: float | None,
+    min_width: int = DEFAULT_CLASSIFICATION_MIN_WIDTH,
+    min_height: int = DEFAULT_CLASSIFICATION_MIN_HEIGHT,
+    min_area_ratio: float = DEFAULT_CLASSIFICATION_MIN_AREA_RATIO,
+    min_sharpness: float = DEFAULT_CLASSIFICATION_MIN_SHARPNESS,
+) -> dict[str, Any]:
+    """Assess fine-grained classification detail independently from detection validity."""
+    reasons: list[str] = []
+    if width < min_width or height < min_height:
+        reasons.append("insufficient_pixel_dimensions")
+    if area_ratio is not None and area_ratio < min_area_ratio:
+        reasons.append("insufficient_frame_area")
+    if sharpness is not None and sharpness < min_sharpness:
+        reasons.append("insufficient_detail_sharpness")
+
+    resolution_score = min(1.0, width / max(min_width, 1), height / max(min_height, 1))
+    area_score = 1.0 if area_ratio is None else min(1.0, area_ratio / max(min_area_ratio, 1e-9))
+    sharpness_score = 1.0 if sharpness is None else min(1.0, sharpness / max(min_sharpness, 1e-9))
+    score = 0.60 * resolution_score + 0.25 * area_score + 0.15 * sharpness_score
+    usable = not reasons
+    return {
+        "classification_usable": usable,
+        "classification_quality_status": "usable" if usable else "needs_review",
+        "classification_quality_score": round(float(score), 6),
+        "classification_quality_reasons": reasons,
+    }
+
+
 @dataclass
 class SelectionRecord:
     source: str
@@ -36,6 +75,11 @@ class SelectionRecord:
     secondary_verification: dict[str, Any] = field(default_factory=dict)
     session_id: str | None = None
     source_video_id: str | None = None
+    detection_valid: bool = True
+    classification_usable: bool = False
+    classification_quality_status: str = "needs_review"
+    classification_quality_score: float = 0.0
+    classification_quality_reasons: list[str] = field(default_factory=list)
     _thumbnail: Any = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -74,6 +118,11 @@ class SelectionRecord:
             "candidate_filter_reasons": self.candidate_filter_reasons,
             "track_statistics": self.track_statistics,
             "secondary_verification": self.secondary_verification,
+            "detection_valid": self.detection_valid,
+            "classification_usable": self.classification_usable,
+            "classification_quality_status": self.classification_quality_status,
+            "classification_quality_score": self.classification_quality_score,
+            "classification_quality_reasons": self.classification_quality_reasons,
             "review_status": "unreviewed",
             "assigned_class": "unknown",
             "label": "unknown",
@@ -119,6 +168,10 @@ class FrameSelector:
         min_sharpness: float = 35.0,
         min_difference: float = 0.06,
         thumbnail_size: int = 64,
+        classification_min_width: int = DEFAULT_CLASSIFICATION_MIN_WIDTH,
+        classification_min_height: int = DEFAULT_CLASSIFICATION_MIN_HEIGHT,
+        classification_min_area_ratio: float = DEFAULT_CLASSIFICATION_MIN_AREA_RATIO,
+        classification_min_sharpness: float = DEFAULT_CLASSIFICATION_MIN_SHARPNESS,
     ) -> None:
         if max_per_track < 1:
             raise ValueError("max_per_track must be at least 1")
@@ -129,6 +182,10 @@ class FrameSelector:
         self.min_sharpness = min_sharpness
         self.min_difference = min_difference
         self.thumbnail_size = thumbnail_size
+        self.classification_min_width = classification_min_width
+        self.classification_min_height = classification_min_height
+        self.classification_min_area_ratio = classification_min_area_ratio
+        self.classification_min_sharpness = classification_min_sharpness
         self.records: list[SelectionRecord] = []
         self._selected: dict[int, list[SelectionRecord]] = {}
         self._track_ids: set[int] = set()
@@ -153,6 +210,16 @@ class FrameSelector:
         size_score = min(1.0, area_ratio / 0.10)
         sharpness_score = min(1.0, sharpness / 500.0)
         quality_score = 0.50 * detection.confidence + 0.25 * size_score + 0.25 * sharpness_score
+        classification_quality = assess_classification_usability(
+            width=crop_width,
+            height=crop_height,
+            area_ratio=area_ratio,
+            sharpness=sharpness,
+            min_width=self.classification_min_width,
+            min_height=self.classification_min_height,
+            min_area_ratio=self.classification_min_area_ratio,
+            min_sharpness=self.classification_min_sharpness,
+        )
         record = SelectionRecord(
             source=source,
             frame_index=frame_index,
@@ -164,6 +231,7 @@ class FrameSelector:
             quality_score=quality_score,
             session_id=session_id,
             source_video_id=source_video_id,
+            **classification_quality,
             _thumbnail=cv2.resize(crop, (self.thumbnail_size, self.thumbnail_size)),
         )
         self.records.append(record)

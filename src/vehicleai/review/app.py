@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
@@ -22,6 +23,7 @@ from vehicleai.classification.prelabel import read_predictions
 from vehicleai.classification.data_audit import normalise_path
 from vehicleai.classification.identity import VehicleIdentityStore, infer_identity
 from vehicleai.review.groups import TrackGroupStore
+from vehicleai.temporal.frame_selection import assess_classification_usability
 
 DEFAULT_DATASET_ROOTS = (
     Path("data/raw/web"),
@@ -88,6 +90,7 @@ def create_app(
     app = Flask(__name__)
     roots = tuple(Path(root) for root in (dataset_roots or DEFAULT_DATASET_ROOTS))
     candidates, active_roots = _discover_all(roots)
+    source_roots = [Path.cwd().resolve() / "data", *(root.parent for root in active_roots)]
     by_id = {_candidate_id(candidate): candidate for candidate in candidates}
     store = AnnotationStore(Path(annotations_path))
     group_store = TrackGroupStore(Path(track_groups_path))
@@ -124,7 +127,49 @@ def create_app(
         EVALUATION_REPORT=evaluation,
         CROSS_VIDEO_DUPLICATES=duplicate_records,
         COLLECTION_STATISTICS=collection_statistics,
+        SOURCE_ROOTS=source_roots,
     )
+
+    def source_video_path(candidate: Candidate) -> Path | None:
+        value = candidate.source_video or (candidate.source if candidate.frame_number is not None else None)
+        if not value or urlparse(str(value)).scheme in {"http", "https"}:
+            return None
+        path = Path(str(value)).resolve()
+        if path.suffix.casefold() not in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+            return None
+        if not path.is_file() or not any(_is_within(path, root) for root in source_roots):
+            return None
+        return path
+
+    def classification_quality(candidate: Candidate) -> dict[str, Any]:
+        width, height = _dimensions(candidate)
+        assessed = assess_classification_usability(
+            width=int(width or 0),
+            height=int(height or 0),
+            area_ratio=candidate.area_ratio,
+            sharpness=candidate.sharpness,
+        )
+        reasons = set(assessed["classification_quality_reasons"])
+        reasons.update(candidate.classification_quality_reasons)
+        detection_valid = (
+            candidate.detection_valid
+            if candidate.detection_valid is not None
+            else (candidate.candidate_status or "accepted") != "filtered"
+        )
+        explicitly_usable = candidate.classification_usable is not False
+        usable = bool(detection_valid and explicitly_usable and assessed["classification_usable"])
+        if not detection_valid:
+            reasons.add("detection_not_valid")
+        score = assessed["classification_quality_score"]
+        if candidate.classification_quality_score is not None:
+            score = min(float(score), float(candidate.classification_quality_score))
+        return {
+            "detection_valid": bool(detection_valid),
+            "classification_usable": usable,
+            "classification_quality_status": "usable" if usable else "needs_review",
+            "classification_quality_score": score,
+            "classification_quality_reasons": sorted(reasons),
+        }
 
     def inferred_identity(candidate: Candidate):
         return infer_identity(
@@ -145,11 +190,14 @@ def create_app(
         final_label = request.args.get("label", "")
         provider = request.args.get("provider", "")
         candidate_status = request.args.get("candidate_status", "reviewable")
+        classification_status = request.args.get("classification_status", "all")
         sort_order = request.args.get("sort", "high_value_first")
         if status not in {"all", "unreviewed", "reviewed"}:
             abort(400, description="无效的审核状态筛选")
         if candidate_status not in {"", "all", "reviewable", "accepted", "suspected_false_positive", "filtered"}:
             abort(400, description="无效的候选质量筛选")
+        if classification_status not in {"", "all", "usable", "needs_review"}:
+            abort(400, description="无效的分类可用性筛选")
         if sort_order not in {"default", "uncertain_first", "high_value_first"}:
             abort(400, description="无效的排序方式")
 
@@ -172,6 +220,12 @@ def create_app(
                 continue
             if candidate_status not in {"", "all", "reviewable"} and effective_candidate_status != candidate_status:
                 continue
+            if classification_status not in {"", "all"}:
+                quality = classification_quality(candidate)
+                if classification_status == "usable" and not quality["classification_usable"]:
+                    continue
+                if classification_status == "needs_review" and quality["classification_usable"]:
+                    continue
             if final_label and (not annotation or annotation.get("label") != final_label):
                 continue
             result.append(candidate)
@@ -254,11 +308,18 @@ def create_app(
         ai_reference_url = None
         if prediction and prediction.get("nearest_reference_path"):
             ai_reference_url = f"/ai-reference/{identifier}"
+        quality = classification_quality(candidate)
+        original_frame_url = (
+            f"/source-frame/{identifier}"
+            if candidate.frame_number is not None and source_video_path(candidate) is not None
+            else None
+        )
         return {
             "id": identifier,
             "filename": candidate.image_path.name,
             "candidate_path": str(candidate.image_path),
             "image_url": f"/candidate-image/{identifier}",
+            "original_frame_url": original_frame_url,
             "class_hint": candidate.class_hint,
             "provider": candidate.provider,
             "query": candidate.query,
@@ -277,6 +338,7 @@ def create_app(
             "suspected_duplicate_track_ids": list(candidate.suspected_duplicate_track_ids),
             "candidate_status": candidate.candidate_status or "accepted",
             "quality_score": candidate.quality_score,
+            **quality,
             "candidate_filter_reasons": list(candidate.candidate_filter_reasons),
             "track_first_frame": candidate.track_first_frame,
             "track_last_frame": candidate.track_last_frame,
@@ -300,11 +362,15 @@ def create_app(
             "cross_video_duplicate_status": duplicate.get("duplicate_status", "not_indexed"),
             "cross_video_duplicate_of": duplicate.get("duplicate_of"),
             "cross_video_duplicate_note": duplicate.get("note"),
+            "sha256": candidate.sha256,
+            "vehicle_identity_history": list(
+                identity_store.history_for(inferred_identity(candidate), candidate.image_path)
+            ),
         }
 
     @app.get("/")
     def index() -> str:
-        return render_template("index.html", labels=LABELS)
+        return render_template("review_v8.html", labels=LABELS)
 
     @app.get("/api/state")
     def state():
@@ -375,6 +441,7 @@ def create_app(
                     "providers": sorted({item.provider for item in candidates if item.provider}),
                     "labels": list(LABELS),
                     "candidate_statuses": ["reviewable", "accepted", "suspected_false_positive", "filtered", "all"],
+                    "classification_statuses": ["all", "usable", "needs_review"],
                 },
                 "evaluation": evaluation,
                 "collection_statistics": collection_statistics,
@@ -513,6 +580,31 @@ def create_app(
         if not any(_is_within(candidate.image_path, root) for root in active_roots):
             abort(404)
         return send_file(candidate.image_path, conditional=True, max_age=0)
+
+    @app.get("/source-frame/<identifier>")
+    def source_frame(identifier: str):
+        candidate = by_id.get(identifier)
+        if candidate is None or candidate.frame_number is None:
+            abort(404)
+        video_path = source_video_path(candidate)
+        if video_path is None:
+            abort(404)
+        import cv2
+
+        capture = cv2.VideoCapture(str(video_path))
+        try:
+            if not capture.isOpened():
+                abort(404)
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(candidate.frame_number))
+            ok, frame = capture.read()
+            if not ok:
+                abort(404)
+            encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if not encoded:
+                abort(500, description="原始帧编码失败")
+            return send_file(BytesIO(buffer.tobytes()), mimetype="image/jpeg", max_age=0)
+        finally:
+            capture.release()
 
     @app.get("/ai-reference/<identifier>")
     def ai_reference(identifier: str):

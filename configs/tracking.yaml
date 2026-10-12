@@ -9,6 +9,15 @@ min_sharpness: 35.0
 min_frame_difference: 0.06
 thumbnail_size: 64
 
+# Detection validity and fine-grained model classification usability are
+# separate. Small crops may be retained for distance/detection research while
+# remaining ineligible for automatic fine-grained classification.
+classification_quality:
+  min_width: 128
+  min_height: 96
+  min_area_ratio: 0.0025
+  min_sharpness: 35.0
+
 diagnostics:
   short_track_max_detections: 4
   min_continuity: 0.50

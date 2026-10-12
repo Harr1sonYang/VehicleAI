@@ -55,6 +55,13 @@ class Candidate:
     source_video_id: str | None = None
     timestamp_ms: float | None = None
     quality_score: float | None = None
+    sharpness: float | None = None
+    area_ratio: float | None = None
+    detection_valid: bool | None = None
+    classification_usable: bool | None = None
+    classification_quality_status: str | None = None
+    classification_quality_score: float | None = None
+    classification_quality_reasons: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -187,6 +194,13 @@ def discover_candidates(root: Path) -> list[Candidate]:
                 source_video_id=record.get("source_video_id"),
                 timestamp_ms=record.get("timestamp_ms"),
                 quality_score=record.get("quality_score"),
+                sharpness=record.get("sharpness"),
+                area_ratio=record.get("area_ratio"),
+                detection_valid=record.get("detection_valid"),
+                classification_usable=record.get("classification_usable"),
+                classification_quality_status=record.get("classification_quality_status"),
+                classification_quality_score=record.get("classification_quality_score"),
+                classification_quality_reasons=tuple(record.get("classification_quality_reasons") or ()),
             )
         )
     return result

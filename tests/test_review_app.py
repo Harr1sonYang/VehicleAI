@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import cv2
+import numpy as np
+import pytest
 from PIL import Image
 
 from vehicleai.review import create_app
@@ -13,11 +16,12 @@ def make_candidate(
     class_hint: str = "charger_target",
     provider: str = "test_provider",
     source_page_url: str = "https://example.test/source",
+    size: tuple[int, int] = (64, 48),
     **extra_metadata,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     image_path = root / name
-    Image.new("RGB", (64, 48), color=(30, 60, 90)).save(image_path)
+    Image.new("RGB", size, color=(30, 60, 90)).save(image_path)
     metadata = {
         "filename": name,
         "image_path": name,
@@ -27,8 +31,8 @@ def make_candidate(
         "source_page_url": source_page_url,
         "source_url": "https://example.test/image.jpg",
         "source_id": f"id-{name}",
-        "width": 64,
-        "height": 48,
+        "width": size[0],
+        "height": size[1],
         **extra_metadata,
     }
     with (root / "metadata.jsonl").open("a", encoding="utf-8") as handle:
@@ -135,13 +139,59 @@ def test_frontend_is_chinese_and_exposes_keyboard_controls(tmp_path: Path) -> No
 
     page = client.get("/").get_data(as_text=True)
     script = client.get("/static/review.js").get_data(as_text=True)
+    styles = client.get("/static/review_v8.css").get_data(as_text=True)
     assert "VehicleAI 数据集审核" in page
     assert "不代表警用或执法用途" in page
     assert "data-label=\"unusable\"" in page
+    assert "id=\"zoom-in\"" in page
+    assert "id=\"fit-preview\"" in page
+    assert "id=\"original-frame-link\"" in page
+    assert "高级信息与身份管理" in page
+    assert "模型评估：严格身份隔离" in page
+    assert "JSON.stringify(evaluation.metrics" not in script
+    assert "grid-template-columns: minmax(0, 1fr) minmax(400px, 470px)" in styles
     for key in ("Digit1", "Numpad1", "Digit6", "Numpad6", "KeyS", "ArrowLeft", "ArrowRight"):
         assert key in script
     assert "event.preventDefault()" in script
     assert "}, true);" in script
+
+
+def test_small_accepted_candidate_is_flagged_for_classification_review(tmp_path: Path) -> None:
+    root = tmp_path / "candidates"
+    make_candidate(root, "small.jpg", size=(75, 58), candidate_status="accepted", detection_valid=True)
+    make_candidate(root, "large.jpg", size=(160, 120), candidate_status="accepted", detection_valid=True)
+    client = create_app([root], tmp_path / "annotations.jsonl").test_client()
+
+    small = client.get("/api/state?status=all&classification_status=needs_review&sort=default").get_json()
+    assert small["filtered_count"] == 1
+    assert small["candidate"]["filename"] == "small.jpg"
+    assert small["candidate"]["candidate_status"] == "accepted"
+    assert small["candidate"]["detection_valid"] is True
+    assert small["candidate"]["classification_usable"] is False
+    assert "insufficient_pixel_dimensions" in small["candidate"]["classification_quality_reasons"]
+
+    usable = client.get("/api/state?status=all&classification_status=usable&sort=default").get_json()
+    assert usable["filtered_count"] == 1
+    assert usable["candidate"]["filename"] == "large.jpg"
+    assert usable["candidate"]["classification_usable"] is True
+
+
+def test_original_video_frame_can_be_viewed_without_exposing_arbitrary_paths(tmp_path: Path) -> None:
+    root = tmp_path / "candidates"
+    video = tmp_path / "source.avi"
+    writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), 5.0, (64, 48))
+    if not writer.isOpened():
+        pytest.skip("MJPG VideoWriter is unavailable")
+    writer.write(np.full((48, 64, 3), 120, dtype=np.uint8))
+    writer.release()
+    make_candidate(root, "candidate.jpg", source=str(video), source_video=str(video), frame_index=0)
+    client = create_app([root], tmp_path / "annotations.jsonl").test_client()
+    candidate = client.get("/api/state?status=all").get_json()["candidate"]
+
+    assert candidate["original_frame_url"]
+    response = client.get(candidate["original_frame_url"])
+    assert response.status_code == 200
+    assert response.mimetype == "image/jpeg"
 
 
 def test_non_http_source_link_is_not_exposed(tmp_path: Path) -> None:

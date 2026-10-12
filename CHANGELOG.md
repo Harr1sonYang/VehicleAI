@@ -13,6 +13,20 @@ All notable VehicleAI changes are documented here. Versions follow Semantic Vers
 - Collection statistics for videos, queue status, tracks, candidates, human labels, and strict-validation identities.
 - High-value reviewer ordering that prioritizes predicted target vehicles while retaining Other and Unknown candidates.
 - Tests for queue recovery, content deduplication, collection statistics, batch metadata, and review priority.
+- Responsive reviewer preview controls for zoom, fit-to-window, native crop size, and opening the original video frame.
+- Independent `detection_valid` and `classification_usable` metadata with conservative fine-grained classification quality reasons and filtering.
+
+### Changed
+
+- Reworked the Flask reviewer into a large preview workspace and wider sticky review sidebar with labels and navigation kept near the image.
+- Moved paths, hashes, Track IDs, vehicle identity history, and related provenance into a collapsed advanced-information panel.
+- Replaced raw confusion-matrix JSON with a table and moved model evaluation and error cases into collapsed panels.
+- Candidate crops below 128×96 pixels remain available for distance/detection research but are marked `needs_review` instead of being treated as fine-grained classification-ready.
+
+### Fixed
+
+- Small crops such as 75×58 candidates are now visibly enlarged for review with an explicit warning that CSS scaling does not add image detail.
+- Legacy candidates without an explicit classification-quality record are evaluated conservatively from their actual pixel dimensions.
 
 ### Safety
 

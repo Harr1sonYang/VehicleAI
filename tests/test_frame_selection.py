@@ -84,3 +84,32 @@ def test_metadata_preserves_batch_session_and_video_identity() -> None:
     assert metadata["session_id"] == "drive-a1b2c3"
     assert metadata["source_video_id"] == "a" * 64
     assert metadata["quality_score"] > 0
+
+
+def test_small_detection_is_retained_but_not_classification_usable() -> None:
+    selector = FrameSelector(
+        min_width=64,
+        min_height=48,
+        min_sharpness=0,
+        classification_min_width=128,
+        classification_min_height=96,
+        classification_min_sharpness=0,
+    )
+    small_vehicle = TrackedDetection(11, 2, "car", 0.96, 0, 0, 75, 58)
+    record = selector.consider(
+        textured_frame(12, size=200),
+        small_vehicle,
+        source="distance-drive.mp4",
+        frame_index=8,
+        timestamp_ms=320,
+    )
+
+    assert record.selected is True
+    assert record.candidate_status == "accepted"
+    assert record.detection_valid is True
+    assert record.classification_usable is False
+    assert record.classification_quality_status == "needs_review"
+    assert "insufficient_pixel_dimensions" in record.classification_quality_reasons
+    metadata = record.to_dict()
+    assert metadata["detection_valid"] is True
+    assert metadata["classification_usable"] is False

@@ -10,12 +10,16 @@ const labelNames = {
 let state = null;
 let currentIndex = Number(localStorage.getItem("vehicleai-review-index") || 0);
 let actionPending = false;
+let previewZoom = 1;
+let previewMode = "fit";
+let previewCandidateId = null;
 const filters = {
   status: document.querySelector("#status-filter"),
   class_hint: document.querySelector("#hint-filter"),
   label: document.querySelector("#label-filter"),
   provider: document.querySelector("#provider-filter"),
   candidate_status: document.querySelector("#candidate-status-filter"),
+  classification_status: document.querySelector("#classification-status-filter"),
   sort: document.querySelector("#sort-filter"),
 };
 
@@ -45,8 +49,39 @@ function showValue(field, value) {
   document.querySelector(`[data-field="${field}"]`).textContent = value ?? "—";
 }
 
+const qualityReasonNames = {
+  insufficient_pixel_dimensions: "像素尺寸不足",
+  insufficient_frame_area: "在原始画面中占比过小",
+  insufficient_detail_sharpness: "细节清晰度不足",
+  detection_not_valid: "检测尚未通过",
+};
+
+function applyPreviewTransform() {
+  const stage = document.querySelector("#preview-stage");
+  const image = document.querySelector("#candidate-image");
+  stage.classList.toggle("fit-preview", previewMode === "fit");
+  stage.classList.toggle("actual-preview", previewMode === "actual");
+  image.style.setProperty("--preview-zoom", String(previewZoom));
+  document.querySelector("#preview-scale").textContent =
+    previewMode === "fit" && previewZoom === 1 ? "适应窗口" : `${Math.round(previewZoom * 100)}%`;
+}
+
+function resetPreview(candidateId) {
+  if (previewCandidateId === candidateId) return;
+  previewCandidateId = candidateId;
+  previewMode = "fit";
+  previewZoom = 1;
+  applyPreviewTransform();
+}
+
+function changeZoom(factor) {
+  previewZoom = Math.max(0.25, Math.min(6, previewZoom * factor));
+  applyPreviewTransform();
+}
+
 function render() {
   const candidate = state.candidate;
+  renderEvaluation();
   document.querySelector("#progress").textContent =
     `浏览 ${state.position}/${state.navigation_count} · 当前筛选 ${state.filtered_count} 张 · 已审核 ${state.reviewed_count}/${state.total_count} · 未审核 ${state.unreviewed_count}`;
   fillOptions(filters.class_hint, state.filters.class_hints);
@@ -56,7 +91,7 @@ function render() {
   const image = document.querySelector("#candidate-image");
   const imageLink = document.querySelector("#full-image-link");
   const empty = document.querySelector("#empty");
-  const controls = document.querySelectorAll(".actions button, #previous, #skip, #next, #confirm-group, #split-track, .identity-editor button");
+  const controls = document.querySelectorAll(".actions button, #previous, #skip, #next, #confirm-group, #split-track, .identity-editor button, .preview-toolbar button");
   controls.forEach(button => { button.disabled = !candidate; });
   if (!candidate) {
     image.removeAttribute("src");
@@ -69,6 +104,7 @@ function render() {
 
   empty.hidden = true;
   imageLink.hidden = false;
+  resetPreview(candidate.id);
   image.src = candidate.image_url;
   imageLink.href = candidate.image_url;
   document.querySelector("#filename").textContent = candidate.filename;
@@ -77,6 +113,8 @@ function render() {
   showValue("provider", candidate.provider);
   showValue("query", candidate.query);
   showValue("dimensions", candidate.width && candidate.height ? `${candidate.width} × ${candidate.height}` : null);
+  showValue("candidate_path", candidate.candidate_path);
+  showValue("sha256", candidate.sha256);
   showValue("source", candidate.source);
   showValue("source_id", candidate.source_id);
   showValue("source_video", candidate.source_video);
@@ -91,6 +129,10 @@ function render() {
   showValue("suspected_duplicate_track_ids", candidate.suspected_duplicate_track_ids?.join(", "));
   showValue("candidate_status", candidate.candidate_status);
   showValue("quality_score", candidate.quality_score == null ? null : candidate.quality_score.toFixed(3));
+  showValue("detection_valid", candidate.detection_valid ? "是" : "否／待确认");
+  showValue("classification_usable", candidate.classification_usable ? "可用于精细分类" : "低质量／待确认");
+  showValue("classification_quality_score", candidate.classification_quality_score == null ? null : candidate.classification_quality_score.toFixed(3));
+  showValue("classification_quality_reasons", candidate.classification_quality_reasons?.map(reason => qualityReasonNames[reason] || reason).join("；"));
   showValue("cross_video_duplicate_status", candidate.cross_video_duplicate_status);
   showValue("cross_video_duplicate_of", candidate.cross_video_duplicate_of);
   showValue("candidate_filter_reasons", candidate.candidate_filter_reasons?.join(", "));
@@ -100,6 +142,7 @@ function render() {
   showValue("vehicle_identity_evidence", candidate.vehicle_identity_evidence);
   showValue("vehicle_identity_members", candidate.vehicle_identity_members?.map(item => `${item.filename} [${item.candidate_id}]`).join("；"));
   showValue("suspected_identity_sources", candidate.suspected_identity_sources?.map(item => `${item.filename} [${item.candidate_id}]`).join("；"));
+  showValue("vehicle_identity_history", candidate.vehicle_identity_history?.map(item => `${item.timestamp || "无时间"} · ${item.action || item.status || "记录"}`).join("；"));
   showValue("ai_recommendation", candidate.ai_recommendation ? (labelNames[candidate.ai_recommendation] || candidate.ai_recommendation) : "无推荐");
   showValue("ai_similarity", candidate.ai_similarity == null ? null : `${candidate.ai_similarity.toFixed(3)}（非概率）`);
   showValue("ai_top3", candidate.ai_top3?.map(item => `${labelNames[item.label] || item.label}: ${item.score.toFixed(3)}`).join(" · "));
@@ -120,11 +163,21 @@ function render() {
   sourceLink.hidden = !candidate.source_page_url;
   if (candidate.source_page_url) sourceLink.href = candidate.source_page_url;
   else sourceLink.removeAttribute("href");
+  const originalFrameLink = document.querySelector("#original-frame-link");
+  originalFrameLink.hidden = !candidate.original_frame_url;
+  if (candidate.original_frame_url) originalFrameLink.href = candidate.original_frame_url;
+  else originalFrameLink.removeAttribute("href");
+  const lowResolutionWarning = document.querySelector("#low-resolution-warning");
+  lowResolutionWarning.hidden = candidate.classification_usable;
+  if (!candidate.classification_usable) {
+    const dimensions = candidate.width && candidate.height ? `${candidate.width} × ${candidate.height}` : "未知尺寸";
+    const reasons = candidate.classification_quality_reasons?.map(reason => qualityReasonNames[reason] || reason).join("、") || "细节不足";
+    lowResolutionWarning.textContent = `原始裁剪图为 ${dimensions}，当前仅通过 CSS 放大以便人工查看，不会增加真实细节。车型分类状态：低质量／待确认（${reasons}）。`;
+  }
   if (state.next_image_url) {
     const preload = new Image();
     preload.src = state.next_image_url;
   }
-  renderEvaluation();
 }
 
 function renderEvaluation() {
@@ -134,12 +187,26 @@ function renderEvaluation() {
   const errors = document.querySelector("#evaluation-errors");
   if (!evaluation) {
     summary.textContent = "尚未载入评估报告。";
-    matrix.textContent = "—";
+    matrix.replaceChildren();
     errors.replaceChildren(Object.assign(document.createElement("li"), {textContent: "—"}));
     return;
   }
   summary.textContent = `Reference ${evaluation.reference_samples} · Calibration ${evaluation.calibration_samples} · Test ${evaluation.validation_samples} · 身份交叉 ${evaluation.identity_overlap.length}`;
-  matrix.textContent = JSON.stringify(evaluation.metrics?.confusion_matrix || {}, null, 2);
+  const matrixData = evaluation.metrics?.confusion_matrix || {};
+  const labels = [...new Set([...Object.keys(matrixData), ...Object.values(matrixData).flatMap(row => Object.keys(row || {}))])];
+  const headRow = document.createElement("tr");
+  headRow.append(Object.assign(document.createElement("th"), {textContent: "实际＼预测"}));
+  labels.forEach(label => headRow.append(Object.assign(document.createElement("th"), {textContent: labelNames[label] || label})));
+  const head = document.createElement("thead");
+  head.append(headRow);
+  const body = document.createElement("tbody");
+  labels.forEach(actual => {
+    const row = document.createElement("tr");
+    row.append(Object.assign(document.createElement("th"), {textContent: labelNames[actual] || actual}));
+    labels.forEach(predicted => row.append(Object.assign(document.createElement("td"), {textContent: String(matrixData[actual]?.[predicted] || 0)})));
+    body.append(row);
+  });
+  matrix.replaceChildren(head, body);
   const items = (evaluation.errors || []).map(error => {
     const item = document.createElement("li");
     item.textContent = `${error.true_label} → ${error.predicted_label}：${error.image_path}`;
@@ -260,6 +327,10 @@ document.querySelectorAll(".actions button").forEach(button => {
 document.querySelector("#previous").addEventListener("click", () => move("previous"));
 document.querySelector("#next").addEventListener("click", () => move("next"));
 document.querySelector("#skip").addEventListener("click", () => move("skip"));
+document.querySelector("#zoom-out").addEventListener("click", () => changeZoom(0.8));
+document.querySelector("#zoom-in").addEventListener("click", () => changeZoom(1.25));
+document.querySelector("#fit-preview").addEventListener("click", () => { previewMode = "fit"; previewZoom = 1; applyPreviewTransform(); });
+document.querySelector("#actual-size").addEventListener("click", () => { previewMode = "actual"; previewZoom = 1; applyPreviewTransform(); });
 document.querySelector("#confirm-group").addEventListener("click", () => updateTrackGroup("merge").catch(showError));
 document.querySelector("#split-track").addEventListener("click", () => updateTrackGroup("split").catch(showError));
 document.querySelector("#confirm-identity").addEventListener("click", () => updateVehicleIdentity("merge").catch(showError));
@@ -283,7 +354,7 @@ filters.status.addEventListener("change", () => {
   currentIndex = 0;
   loadState().catch(showError);
 });
-[filters.class_hint, filters.provider, filters.candidate_status, filters.sort].forEach(element => element.addEventListener("change", () => {
+[filters.class_hint, filters.provider, filters.candidate_status, filters.classification_status, filters.sort].forEach(element => element.addEventListener("change", () => {
   currentIndex = 0;
   loadState().catch(showError);
 }));

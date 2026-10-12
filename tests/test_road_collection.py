@@ -129,3 +129,5 @@ def test_review_defaults_to_target_candidate_priority(tmp_path: Path) -> None:
     assert state["candidate"]["filename"] == "target.jpg"
     assert state["candidate"]["session_id"] == "b"
     assert state["candidate"]["quality_score"] == 0.81
+    assert state["candidate"]["detection_valid"] is True
+    assert state["candidate"]["classification_usable"] is False

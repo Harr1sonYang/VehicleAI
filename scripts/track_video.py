@@ -78,6 +78,7 @@ def main() -> int:
         tracking_confidence=float(config.get("tracking_confidence", 0.10)),
         agnostic_nms=bool(config.get("agnostic_nms", True)),
     )
+    classification_quality_config = config.get("classification_quality", {})
     selector = FrameSelector(
         max_per_track=int(config.get("max_selected_per_track", 5)),
         min_width=int(config.get("min_crop_width", 64)),
@@ -86,6 +87,10 @@ def main() -> int:
         min_sharpness=float(config.get("min_sharpness", 35.0)),
         min_difference=float(config.get("min_frame_difference", 0.06)),
         thumbnail_size=int(config.get("thumbnail_size", 64)),
+        classification_min_width=int(classification_quality_config.get("min_width", 128)),
+        classification_min_height=int(classification_quality_config.get("min_height", 96)),
+        classification_min_area_ratio=float(classification_quality_config.get("min_area_ratio", 0.0025)),
+        classification_min_sharpness=float(classification_quality_config.get("min_sharpness", 35.0)),
     )
     capture = open_video_source(str(args.source))
     fps = capture.get(cv2.CAP_PROP_FPS) or 30.0
@@ -195,6 +200,12 @@ def main() -> int:
         record.suspected_duplicate_track_ids = associations.suspected_by_track.get(track_id, [])
         record.candidate_status = quality["candidate_status"]
         record.candidate_filter_reasons = quality["filter_reasons"]
+        record.detection_valid = quality["candidate_status"] != "filtered"
+        if not record.detection_valid:
+            record.classification_usable = False
+            record.classification_quality_status = "needs_review"
+            if "detection_not_valid" not in record.classification_quality_reasons:
+                record.classification_quality_reasons.append("detection_not_valid")
         record.track_statistics = {
             key: value
             for key, value in diagnostics[track_id].items()
@@ -236,6 +247,7 @@ def main() -> int:
         {str(track_id): diagnostic for track_id, diagnostic in sorted(diagnostics.items())},
     )
     status_counts = Counter(record.candidate_status for record in selected)
+    classification_status_counts = Counter(record.classification_quality_status for record in selected)
     group_link_count = sum(max(0, len(members) - 1) for members in associations.group_members.values())
     summary = {
         "source": str(args.source),
@@ -254,6 +266,7 @@ def main() -> int:
             item.status == "suspected_duplicate" for item in associations.associations
         ),
         "candidate_status_counts": dict(sorted(status_counts.items())),
+        "classification_quality_status_counts": dict(sorted(classification_status_counts.items())),
         "false_positive_filter_enabled": bool(filter_config.get("enabled", True)),
         "secondary_verifier_available": verifier.model is not None,
     }

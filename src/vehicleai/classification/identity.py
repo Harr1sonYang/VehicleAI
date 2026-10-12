@@ -70,6 +70,7 @@ class VehicleIdentityStore:
         self.path = Path(path)
         self._overrides: dict[str, VehicleIdentity] = {}
         self._suggestions: dict[str, set[str]] = {}
+        self._history: list[dict[str, Any]] = []
         self._load()
 
     @staticmethod
@@ -107,7 +108,9 @@ class VehicleIdentityStore:
                 if not line.strip():
                     continue
                 try:
-                    self._apply(json.loads(line))
+                    record = json.loads(line)
+                    self._history.append(record)
+                    self._apply(record)
                 except (json.JSONDecodeError, KeyError, TypeError) as error:
                     raise ValueError(f"Invalid identity record at {self.path}:{line_number}: {error}") from error
 
@@ -121,8 +124,27 @@ class VehicleIdentityStore:
         with self.path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(complete, ensure_ascii=False) + "\n")
             handle.flush()
+        self._history.append(complete)
         self._apply(complete)
         return complete
+
+    def history_for(
+        self,
+        inferred: VehicleIdentity,
+        image_path: str | Path,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return append-only decisions relevant to an inferred/image subject."""
+        subjects = {inferred.subject_key, self.image_subject(image_path)}
+        resolved = self.resolve(inferred, image_path)
+        return tuple(
+            dict(record)
+            for record in self._history
+            if subjects.intersection(str(value) for value in record.get("subject_keys", []))
+            or (
+                resolved.vehicle_identity_id
+                and record.get("vehicle_identity_id") == resolved.vehicle_identity_id
+            )
+        )
 
     def _subjects_for_id(self, identity_id: str) -> set[str]:
         return {subject for subject, identity in self._overrides.items() if identity.vehicle_identity_id == identity_id}

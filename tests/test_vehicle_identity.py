@@ -42,6 +42,8 @@ def test_manual_merge_split_and_suspicion_are_append_only(tmp_path: Path) -> Non
     reloaded = VehicleIdentityStore(path)
     assert len(path.read_text(encoding="utf-8").splitlines()) == 3
     assert reloaded.resolve(left, left_path).vehicle_identity_id != reloaded.resolve(right, right_path).vehicle_identity_id
+    history = reloaded.history_for(left, left_path)
+    assert [record["action"] for record in history] == ["suspected_duplicate", "confirm_merge", "split"]
 
 
 def test_cross_source_similarity_only_creates_a_suggestion(tmp_path: Path) -> None:

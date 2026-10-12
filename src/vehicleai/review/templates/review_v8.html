@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VehicleAI 数据集审核</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='review_v8.css', v=8) }}">
+</head>
+<body>
+  <header class="page-header">
+    <div>
+      <h1>VehicleAI 数据集审核</h1>
+      <p class="warning">目标标签仅表示目标车身／外观代际，不代表警用或执法用途。</p>
+    </div>
+    <div id="progress" class="progress">正在载入…</div>
+  </header>
+
+  <section class="filters" aria-label="筛选器">
+    <label>审核状态<select id="status-filter"><option value="unreviewed">未审核</option><option value="all">全部</option><option value="reviewed">已审核</option></select></label>
+    <label>候选类别<select id="hint-filter"><option value="">全部</option></select></label>
+    <label>最终标签<select id="label-filter"><option value="">全部</option></select></label>
+    <label>来源提供方<select id="provider-filter"><option value="">全部</option></select></label>
+    <label>检测候选状态<select id="candidate-status-filter"><option value="reviewable">可审核（默认）</option><option value="accepted">检测已接受</option><option value="suspected_false_positive">疑似误检</option><option value="filtered">已过滤</option><option value="all">全部</option></select></label>
+    <label>车型分类可用性<select id="classification-status-filter"><option value="all">全部</option><option value="usable">可用于精细分类</option><option value="needs_review">低质量／待确认</option></select></label>
+    <label>排序<select id="sort-filter"><option value="high_value_first">目标车型高价值优先</option><option value="default">默认</option><option value="uncertain_first">AI 不确定优先</option></select></label>
+  </section>
+
+  <main class="review-layout">
+    <section class="viewer-card" aria-label="候选图片预览">
+      <div class="preview-toolbar">
+        <button id="zoom-out" type="button" title="缩小预览">−</button>
+        <button id="zoom-in" type="button" title="放大预览">＋</button>
+        <button id="fit-preview" type="button">适应窗口</button>
+        <button id="actual-size" type="button">原始大小</button>
+        <span id="preview-scale">适应窗口</span>
+        <a id="original-frame-link" class="toolbar-link" target="_blank" rel="noopener" hidden>查看原始帧</a>
+      </div>
+      <div id="preview-stage" class="viewer fit-preview">
+        <a id="full-image-link" target="_blank" rel="noopener" title="点击查看原始裁剪图"><img id="candidate-image" alt="当前候选图片"></a>
+        <div id="empty" class="empty" hidden>当前筛选条件下没有候选图片。</div>
+      </div>
+      <p id="low-resolution-warning" class="resolution-warning" hidden></p>
+    </section>
+
+    <aside class="review-sidebar">
+      <h2 id="filename">—</h2>
+      <dl class="summary-grid">
+        <dt>候选类别</dt><dd data-field="class_hint">—</dd><dt>当前标签</dt><dd data-field="label">未审核</dd>
+        <dt>原图尺寸</dt><dd data-field="dimensions">—</dd><dt>检测状态</dt><dd data-field="candidate_status">—</dd>
+        <dt>检测有效</dt><dd data-field="detection_valid">—</dd><dt>分类可用</dt><dd data-field="classification_usable">—</dd>
+        <dt>分类质量</dt><dd data-field="classification_quality_score">—</dd><dt>待确认原因</dt><dd data-field="classification_quality_reasons">—</dd>
+      </dl>
+      <section class="actions" aria-label="标注操作">
+        <button data-label="charger_target"><kbd>1</kbd> Charger</button><button data-label="explorer_target"><kbd>2</kbd> Explorer / PIU</button><button data-label="durango_target"><kbd>3</kbd> Durango</button>
+        <button data-label="other"><kbd>4</kbd> 其他</button><button data-label="unknown"><kbd>5</kbd> 不确定</button><button data-label="unusable"><kbd>6</kbd> 不可用</button>
+      </section>
+      <section class="navigation"><button id="previous"><kbd>←</kbd> 上一张</button><button id="skip"><kbd>S</kbd> 跳过</button><button id="next"><kbd>→</kbd> 下一张</button></section>
+      <p id="message" role="status"></p>
+
+      <details class="panel ai-panel" open>
+        <summary>AI 预标注（仅供审核）</summary>
+        <dl><dt>推荐类别</dt><dd data-field="ai_recommendation">—</dd><dt>余弦相似度</dt><dd data-field="ai_similarity">—</dd><dt>Top-3</dt><dd data-field="ai_top3">—</dd></dl>
+        <a id="ai-reference-link" target="_blank" rel="noopener" hidden><img id="ai-reference-image" alt="最相似人工参考图片"><span>查看最相似人工参考图片</span></a>
+        <button id="accept-ai" disabled>一键接受 AI 推荐</button><p>分数是相似度，不是概率；接受后才会写入人工标注。</p>
+      </details>
+
+      <details class="panel advanced-panel">
+        <summary>高级信息与身份管理</summary>
+        <a id="source-link" class="source-link" target="_blank" rel="noopener noreferrer" hidden>打开来源页面</a>
+        <dl class="technical-grid">
+          <dt>裁剪路径</dt><dd data-field="candidate_path">—</dd><dt>SHA256</dt><dd data-field="sha256">—</dd>
+          <dt>来源</dt><dd data-field="source">—</dd><dt>来源提供方</dt><dd data-field="provider">—</dd><dt>搜索词</dt><dd data-field="query">—</dd><dt>来源 ID</dt><dd data-field="source_id">—</dd>
+          <dt>来源视频</dt><dd data-field="source_video">—</dd><dt>视频内容 ID</dt><dd data-field="source_video_id">—</dd><dt>采集会话</dt><dd data-field="session_id">—</dd><dt>视频时间</dt><dd data-field="timestamp_ms">—</dd>
+          <dt>帧号</dt><dd data-field="frame_number">—</dd><dt>Track ID</dt><dd data-field="track_id">—</dd><dt>车辆组</dt><dd data-field="vehicle_group_id">—</dd><dt>组内轨迹</dt><dd data-field="group_track_ids">—</dd>
+          <dt>关联状态</dt><dd data-field="association_status">—</dd><dt>疑似重复</dt><dd data-field="suspected_duplicate_track_ids">—</dd><dt>候选质量分</dt><dd data-field="quality_score">—</dd><dt>检测过滤原因</dt><dd data-field="candidate_filter_reasons">—</dd>
+          <dt>跨视频重复</dt><dd data-field="cross_video_duplicate_status">—</dd><dt>重复来源图片</dt><dd data-field="cross_video_duplicate_of">—</dd><dt>候选 ID</dt><dd data-field="candidate_id">—</dd>
+          <dt>车辆身份</dt><dd data-field="vehicle_identity_id">—</dd><dt>身份状态</dt><dd data-field="vehicle_identity_status">—</dd><dt>身份证据</dt><dd data-field="vehicle_identity_evidence">—</dd>
+          <dt>身份组图片</dt><dd data-field="vehicle_identity_members">—</dd><dt>疑似同车来源</dt><dd data-field="suspected_identity_sources">—</dd><dt>身份历史</dt><dd data-field="vehicle_identity_history">—</dd>
+        </dl>
+        <section class="group-editor"><label>人工车辆组 Track ID（逗号分隔）<input id="group-track-ids" type="text" inputmode="numeric"></label><div><button id="confirm-group">确认合并</button><button id="split-track">拆分当前 Track</button></div></section>
+        <section class="identity-editor"><h3>真实车辆身份（独立于轨迹组）</h3><label>其他候选 ID（逗号分隔）<input id="identity-candidate-ids" type="text"></label><div><button id="confirm-identity">确认同一车辆</button><button id="split-identity">拆分当前图片</button><button id="unknown-identity">标记身份未知</button><button id="suspect-identity">仅标记疑似重复</button></div><p>轨迹关联和外观相似不等于真实身份；跨来源合并必须人工确认。</p></section>
+      </details>
+    </aside>
+  </main>
+
+  <details class="evaluation-panel"><summary>模型评估：严格身份隔离</summary><p id="evaluation-summary">尚未载入评估报告。</p><div class="matrix-scroll"><table id="confusion-matrix" aria-label="混淆矩阵"></table></div><details class="evaluation-errors"><summary>错误案例</summary><ul id="evaluation-errors"><li>—</li></ul></details></details>
+  <script src="{{ url_for('static', filename='review.js', v=8) }}"></script>
+</body>
+</html>
