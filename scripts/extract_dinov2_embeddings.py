@@ -13,6 +13,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="提取并缓存 DINOv2 ViT-S/14 图像特征")
     parser.add_argument("--manifest", type=Path, default=Path("data/curated/curated_manifest.jsonl"))
     parser.add_argument("--annotations", type=Path, default=Path("data/annotations/annotations.jsonl"))
+    parser.add_argument("--identities", type=Path, default=Path("data/annotations/vehicle_identities.jsonl"))
     parser.add_argument("--cache", type=Path, default=Path("data/embeddings/dinov2_vits14.npz"))
     parser.add_argument("--hub-cache", type=Path, default=Path("models/torch_hub"))
     parser.add_argument("--device", default="auto")
@@ -23,7 +24,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    audit = audit_human_samples(args.manifest, args.annotations)
+    audit = audit_human_samples(args.manifest, args.annotations, identities_path=args.identities)
     extractor = DinoV2Extractor(device=args.device, hub_cache=args.hub_cache, allow_download=not args.offline)
     cache = EmbeddingCache(args.cache, extractor.model_name)
     _, stats = cache.embeddings_for(

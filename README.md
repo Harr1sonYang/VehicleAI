@@ -16,7 +16,8 @@ The exact v0.1.0 snapshot is preserved by tag `v0.1.0`. The v0.2.0 and v0.2.1
 milestones were developed in one uncommitted working tree, so no misleading
 historical tags are created for them. Their functionality and recovery status
 are recorded in the changelog. Version v0.3.0 is the first exact, tested
-post-v0.1 snapshot.
+post-v0.1 snapshot. Current v0.3.1 work is developed on
+`feature/v0.3.1-validation` and is not merged into `main` automatically.
 
 ## Current scope
 
@@ -255,6 +256,55 @@ and suspected duplicates. Reviewers can confirm a merge or split the current
 track; these decisions append to `data/annotations/track_groups.jsonl` without
 rewriting tracking metadata. The API rejects manual merges when known track
 frame ranges overlap.
+
+## v0.3.1: vehicle identity and strict validation
+
+Vehicle identity is stored independently from Track ID, automatic
+`vehicle_group_id`, and human body-class labels. A single ByteTrack track is
+accepted as same-track evidence; automatic cross-track association and visual
+similarity are never treated as proof that two sources contain the same
+real-world vehicle. Manual identity decisions are append-only in
+`data/annotations/vehicle_identities.jsonl`.
+
+The reviewer supports confirmed identity merges, splitting an incorrect
+identity, explicitly retaining `unknown_identity`, and recording a pair as
+`suspected_duplicate` without merging it. It also shows identity members,
+suspected sources, AI evidence, the latest confusion matrix, and error cases.
+
+Generate cross-source appearance candidates without changing identities:
+
+```powershell
+python scripts/suggest_identity_duplicates.py --offline
+```
+
+Run the strict Reference/Calibration/Test evaluation:
+
+```powershell
+python scripts/evaluate_prelabeler.py --offline --device auto
+```
+
+Confirmed identities and duplicate clusters never cross sets. Unknown or
+ambiguous identities remain reference-only. Calibration chooses thresholds;
+Test is read only for final metrics. A class needs at least five confirmed
+independent vehicles for the first strict split, otherwise its status is
+`insufficient_data` and no accuracy is claimed.
+
+Run a blind test on an independent directory. These files are never added to
+the reference library, and exact reference overlaps are rejected:
+
+```powershell
+python scripts/blind_test_directory.py D:\independent_vehicle_images --offline
+```
+
+The output `data/predictions/blind_test.jsonl` contains Top-3 classes, cosine
+similarities, class margin, abstention/unknown decisions, and nearest reference
+paths. Later evaluation is optional and only accepts a separate JSONL whose
+human labels also contain `identity_confirmed: true`:
+
+```powershell
+python scripts/blind_test_directory.py D:\independent_vehicle_images `
+  --offline --trusted-labels D:\independent_vehicle_labels.jsonl
+```
 
 ## v0.3: AI-assisted vehicle-body pre-labeling
 

@@ -13,6 +13,8 @@ import numpy as np
 from .data_audit import AuditedSample, TRAINING_LABELS
 from .prelabel import BalancedKNNClassifier
 
+MIN_IDENTITIES_PER_CLASS = 5
+
 
 def split_reference_validation(
     samples: list[AuditedSample], *, validation_fraction: float = 0.2
@@ -65,6 +67,73 @@ def split_reference_calibration_validation(
     held_out = calibration_groups | validation_groups
     reference = [index for index, sample in enumerate(samples) if sample.identity_group not in held_out]
     return reference, calibration, validation
+
+
+def build_strict_split(
+    samples: list[AuditedSample],
+    *,
+    holdout_fraction: float = 0.2,
+    minimum_identities_per_class: int = MIN_IDENTITIES_PER_CLASS,
+) -> tuple[list[int], list[int], list[int], dict[str, Any]]:
+    """Build leakage-safe Reference/Calibration/Test sets.
+
+    A class needs enough confirmed identities for all three roles. Unconfirmed
+    identities remain reference-only, and insufficient classes receive no
+    calibration or test samples.
+    """
+    group_indices: dict[str, list[int]] = {}
+    for index, sample in enumerate(samples):
+        if sample.identity_confirmed:
+            group_indices.setdefault(sample.identity_group, []).append(index)
+    groups_by_label: dict[str, list[str]] = {label: [] for label in TRAINING_LABELS}
+    for group, indices in group_indices.items():
+        labels = {samples[index].label for index in indices}
+        if len(labels) == 1:
+            groups_by_label[next(iter(labels))].append(group)
+
+    calibration_groups: set[str] = set()
+    test_groups: set[str] = set()
+    class_data: dict[str, Any] = {}
+    for label, groups in groups_by_label.items():
+        ordered = sorted(groups, key=lambda value: hashlib.sha256(value.encode("utf-8")).hexdigest())
+        ready = len(ordered) >= minimum_identities_per_class
+        if ready:
+            count = max(1, round(len(ordered) * holdout_fraction))
+            count = min(count, (len(ordered) - 1) // 2)
+            calibration_groups.update(ordered[:count])
+            test_groups.update(ordered[count : count * 2])
+        class_data[label] = {
+            "status": "ready" if ready else "insufficient_data",
+            "confirmed_identity_count": len(ordered),
+            "valid_sample_count": sum(1 for sample in samples if sample.label == label),
+            "confirmed_sample_count": sum(
+                1 for sample in samples if sample.label == label and sample.identity_confirmed
+            ),
+            "minimum_identity_count": minimum_identities_per_class,
+            "additional_identities_needed": max(0, minimum_identities_per_class - len(ordered)),
+        }
+    held_out = calibration_groups | test_groups
+    reference = [index for index, sample in enumerate(samples) if sample.identity_group not in held_out]
+    calibration = [index for index, sample in enumerate(samples) if sample.identity_group in calibration_groups]
+    test = [index for index, sample in enumerate(samples) if sample.identity_group in test_groups]
+    for label in TRAINING_LABELS:
+        class_data[label].update(
+            {
+                "reference_samples": sum(samples[index].label == label for index in reference),
+                "calibration_samples": sum(samples[index].label == label for index in calibration),
+                "test_samples": sum(samples[index].label == label for index in test),
+                "reference_identities": len(
+                    {samples[index].identity_group for index in reference if samples[index].label == label and samples[index].identity_confirmed}
+                ),
+                "calibration_identities": len(
+                    {samples[index].identity_group for index in calibration if samples[index].label == label}
+                ),
+                "test_identities": len(
+                    {samples[index].identity_group for index in test if samples[index].label == label}
+                ),
+            }
+        )
+    return reference, calibration, test, class_data
 
 
 def _select_thresholds(predictions: list[Any], truth: list[str]) -> tuple[float, float, dict[str, Any]]:
@@ -138,7 +207,7 @@ def evaluate_split(
     similarity_threshold: float,
     margin_threshold: float,
 ) -> dict[str, Any]:
-    reference, calibration, validation = split_reference_calibration_validation(samples)
+    reference, calibration, validation, class_data = build_strict_split(samples)
     report: dict[str, Any] = {
         "reference_samples": len(reference),
         "validation_samples": len(validation),
@@ -150,6 +219,21 @@ def evaluate_split(
             {samples[index].identity_group for index in reference}
             & {samples[index].identity_group for index in validation}
         ),
+        "split_overlaps": {
+            "reference_calibration": sorted(
+                {samples[index].identity_group for index in reference}
+                & {samples[index].identity_group for index in calibration}
+            ),
+            "reference_test": sorted(
+                {samples[index].identity_group for index in reference}
+                & {samples[index].identity_group for index in validation}
+            ),
+            "calibration_test": sorted(
+                {samples[index].identity_group for index in calibration}
+                & {samples[index].identity_group for index in validation}
+            ),
+        },
+        "class_data": class_data,
     }
     if not reference or not validation:
         report["metrics"] = classification_metrics([], [], [])
@@ -183,6 +267,15 @@ def evaluate_split(
         [prediction.predicted_label for prediction in predictions],
         [[item["label"] for item in prediction.top3] for prediction in predictions],
     )
+    for label in TRAINING_LABELS:
+        report["metrics"]["per_class"][label]["data_status"] = class_data[label]["status"]
+        report["metrics"]["per_class"][label]["confirmed_identity_count"] = class_data[label][
+            "confirmed_identity_count"
+        ]
+        if class_data[label]["status"] == "insufficient_data":
+            report["metrics"]["per_class"][label].update(
+                {"precision": None, "recall": None, "f1": None}
+            )
     report["errors"] = [
         {
             "image_path": str(samples[index].image_path),
@@ -203,7 +296,7 @@ def write_evaluation_report(report: dict[str, Any], json_path: Path, markdown_pa
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     metrics = report["evaluation"]["metrics"]
     lines = [
-        "# VehicleAI v0.3 预标注评估",
+        "# VehicleAI v0.3.1 身份隔离预标注评估",
         "",
         "> 相似度是余弦相似度，不是真实概率。AI 预测不覆盖人工标签。",
         "",
@@ -212,9 +305,9 @@ def write_evaluation_report(report: dict[str, Any], json_path: Path, markdown_pa
         f"- 可用去重样本：{report['audit']['usable_unique_rows']}",
         f"- 已确认身份组：{report['audit']['confirmed_identity_groups']}",
         f"- 身份未确认、仅作参考：{report['audit']['unconfirmed_identity_rows']}",
-        f"- 验证样本：{report['evaluation']['validation_samples']}",
+        f"- Test 样本：{report['evaluation']['validation_samples']}",
         f"- 阈值校准样本：{report['evaluation'].get('calibration_samples', 0)}",
-        f"- 参考/验证身份交叉：{len(report['evaluation']['identity_overlap'])}",
+        f"- Reference/Calibration/Test 身份交叉：{sum(len(value) for value in report['evaluation']['split_overlaps'].values())}",
         "",
         "## 每类指标",
         "",
@@ -225,6 +318,13 @@ def write_evaluation_report(report: dict[str, Any], json_path: Path, markdown_pa
         values = metrics["per_class"][label]
         fmt = lambda value: "不可靠/无样本" if value is None else f"{value:.3f}"
         lines.append(f"| {label} | {fmt(values['precision'])} | {fmt(values['recall'])} | {fmt(values['f1'])} | {values['support']} |")
+    lines.extend(["", "## 独立车辆与数据缺口", "", "| 类别 | 状态 | 已确认车辆 | 还需车辆 | 有效样本 | 测试样本 |", "|---|---|---:|---:|---:|---:|"])
+    for label in TRAINING_LABELS:
+        data = report["evaluation"]["class_data"][label]
+        lines.append(
+            f"| {label} | {data['status']} | {data['confirmed_identity_count']} | "
+            f"{data['additional_identities_needed']} | {data['valid_sample_count']} | {data['test_samples']} |"
+        )
     top3 = "不可靠/无样本" if metrics["top3_accuracy"] is None else f"{metrics['top3_accuracy']:.3f}"
     abstention = "不可靠/无样本" if metrics["abstention_rate"] is None else f"{metrics['abstention_rate']:.3f}"
     lines.extend(

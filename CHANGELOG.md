@@ -2,6 +2,28 @@
 
 All notable VehicleAI changes are documented here. Versions follow Semantic Versioning where a recoverable release commit exists.
 
+## [0.3.1] - Unreleased
+
+### Added
+
+- Append-only, evidence-aware `vehicle_identity` records independent from Track ID and automatic track groups.
+- Manual vehicle identity merge, split, unknown, and suspected-duplicate actions in the Flask reviewer.
+- Strict Reference/Calibration/Test splitting with identity and duplicate leakage protection.
+- Per-class independent-vehicle counts, `insufficient_data` status, and explicit data-shortage reporting.
+- Independent-directory DINOv2+kNN blind testing with Top-3, abstention, margin, nearest reference, and JSONL output.
+- Optional blind-test metrics that require later human labels with confirmed vehicle identity.
+- Cross-source DINOv2 similarity suggestions that never automatically merge identities.
+- Reviewer display of identity members, suspected sources, confusion matrix, and error cases.
+
+### Changed
+
+- Automatic cross-track `vehicle_group_id` association is no longer treated as verified real-world identity.
+- Test samples are never used for threshold selection; thresholds come from the separate Calibration set.
+
+### Known limitations
+
+- Charger, Explorer, and Durango currently have zero confirmed independent vehicle identities and remain `insufficient_data` for strict evaluation.
+
 ## [0.3.0] - 2026-10-11
 
 ### Added

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 from pathlib import Path
 from typing import Any, Iterable
@@ -18,6 +19,7 @@ from vehicleai.classification.curation import (
     discover_candidates,
 )
 from vehicleai.classification.prelabel import read_predictions
+from vehicleai.classification.identity import VehicleIdentityStore, infer_identity
 from vehicleai.review.groups import TrackGroupStore
 
 DEFAULT_DATASET_ROOTS = (
@@ -75,6 +77,9 @@ def create_app(
     annotations_path: Path = Path("data/annotations/annotations.jsonl"),
     track_groups_path: Path = Path("data/annotations/track_groups.jsonl"),
     predictions_path: Path = Path("data/predictions/prelabels.jsonl"),
+    identities_path: Path = Path("data/annotations/vehicle_identities.jsonl"),
+    evaluation_path: Path = Path("results/prelabeling/evaluation.json"),
+    identity_suggestions_path: Path = Path("data/annotations/identity_suggestions.jsonl"),
 ) -> Flask:
     """Create the loopback-only review app; the runner controls the bind address."""
     app = Flask(__name__)
@@ -84,6 +89,13 @@ def create_app(
     store = AnnotationStore(Path(annotations_path))
     group_store = TrackGroupStore(Path(track_groups_path))
     predictions = read_predictions(Path(predictions_path))
+    identity_store = VehicleIdentityStore(Path(identities_path))
+    suggestion_store = VehicleIdentityStore(Path(identity_suggestions_path))
+    evaluation = (
+        json.loads(Path(evaluation_path).read_text(encoding="utf-8"))
+        if Path(evaluation_path).is_file()
+        else None
+    )
     write_lock = threading.Lock()
 
     app.config.update(
@@ -93,7 +105,22 @@ def create_app(
         ANNOTATION_STORE=store,
         TRACK_GROUP_STORE=group_store,
         AI_PREDICTIONS=predictions,
+        VEHICLE_IDENTITY_STORE=identity_store,
+        EVALUATION_REPORT=evaluation,
     )
+
+    def inferred_identity(candidate: Candidate):
+        return infer_identity(
+            image_path=candidate.image_path,
+            source_video=candidate.source_video,
+            track_id=candidate.track_id,
+            vehicle_id=candidate.vehicle_id,
+            provider=candidate.provider,
+            source_id=candidate.source_id,
+        )
+
+    def effective_identity(candidate: Candidate):
+        return identity_store.resolve(inferred_identity(candidate), candidate.image_path)
 
     def filtered_candidates(*, include_status: bool = True) -> list[Candidate]:
         status = request.args.get("status", "unreviewed")
@@ -159,6 +186,30 @@ def create_app(
             }
         ) if effective_group else list(candidate.group_track_ids)
         prediction = predictions.get(candidate.key)
+        identity = effective_identity(candidate)
+        identity_members = [
+            {
+                "candidate_id": _candidate_id(item),
+                "filename": item.image_path.name,
+                "source": item.source_video or item.source,
+                "track_id": item.track_id,
+            }
+            for item in candidates
+            if effective_identity(item).vehicle_identity_id == identity.vehicle_identity_id
+        ]
+        suggested_subjects = set(identity_store.suggestions_for(identity)) | set(
+            suggestion_store.suggestions_for(identity)
+        )
+        suspected_sources = [
+            {
+                "candidate_id": _candidate_id(item),
+                "filename": item.image_path.name,
+                "source": item.source_video or item.source,
+                "track_id": item.track_id,
+            }
+            for item in candidates
+            if inferred_identity(item).subject_key in suggested_subjects
+        ]
         ai_reference_url = None
         if prediction and prediction.get("nearest_reference_path"):
             ai_reference_url = f"/ai-reference/{identifier}"
@@ -196,6 +247,11 @@ def create_app(
             "ai_score_semantics": prediction.get("score_semantics") if prediction else None,
             "ai_nearest_reference_path": prediction.get("nearest_reference_path") if prediction else None,
             "ai_nearest_reference_url": ai_reference_url,
+            "vehicle_identity_id": identity.vehicle_identity_id,
+            "vehicle_identity_status": identity.status,
+            "vehicle_identity_evidence": identity.evidence,
+            "vehicle_identity_members": identity_members,
+            "suspected_identity_sources": suspected_sources,
         }
 
     @app.get("/")
@@ -272,6 +328,7 @@ def create_app(
                     "labels": list(LABELS),
                     "candidate_statuses": ["reviewable", "accepted", "suspected_false_positive", "filtered", "all"],
                 },
+                "evaluation": evaluation,
             }
         )
 
@@ -335,6 +392,66 @@ def create_app(
                 record = group_store.split(source_video, int(candidate.track_id))
             else:
                 abort(400, description="无效的轨迹组操作")
+        except (TypeError, ValueError) as error:
+            abort(400, description=str(error))
+        return jsonify({"ok": True, **record})
+
+    @app.post("/api/vehicle-identities")
+    def update_vehicle_identity():
+        payload = request.get_json(silent=True) or {}
+        current = by_id.get(payload.get("candidate_id"))
+        if current is None:
+            abort(404, description="候选图片不存在")
+        action = payload.get("action")
+        selected = [current]
+        for identifier in payload.get("candidate_ids", []):
+            item = by_id.get(identifier)
+            if item is None:
+                abort(400, description="包含不存在的候选 ID")
+            if item not in selected:
+                selected.append(item)
+        try:
+            if action in {"merge", "suspect"}:
+                if len(selected) < 2:
+                    abort(400, description="至少需要两个候选")
+                labels = {
+                    store.latest[item.key]["label"]
+                    for item in selected
+                    if item.key in store.latest and store.latest[item.key].get("label") not in {None, "unknown", "unusable"}
+                }
+                if action == "merge" and len(labels) > 1:
+                    abort(409, description="人工车型标签冲突，请先核对标签")
+                for index, left in enumerate(selected):
+                    for right in selected[index + 1 :]:
+                        same_video = (left.source_video or left.source) == (right.source_video or right.source)
+                        intervals_known = None not in {
+                            left.track_first_frame,
+                            left.track_last_frame,
+                            right.track_first_frame,
+                            right.track_last_frame,
+                        }
+                        if same_video and intervals_known:
+                            overlap = max(left.track_first_frame, right.track_first_frame) <= min(
+                                left.track_last_frame, right.track_last_frame
+                            )
+                            if overlap:
+                                abort(409, description="同一时段同时出现的车辆不能确认为同一身份")
+                identities = [effective_identity(item) for item in selected]
+                record = (
+                    identity_store.merge(identities, note=payload.get("note"))
+                    if action == "merge"
+                    else identity_store.suggest_duplicate(identities)
+                )
+            elif action == "split":
+                record = identity_store.split(
+                    inferred_identity(current),
+                    current.image_path,
+                    whole_subject=bool(payload.get("whole_subject")),
+                )
+            elif action == "unknown":
+                record = identity_store.mark_unknown(current.image_path)
+            else:
+                abort(400, description="无效的车辆身份操作")
         except (TypeError, ValueError) as error:
             abort(400, description=str(error))
         return jsonify({"ok": True, **record})

@@ -56,7 +56,7 @@ function render() {
   const image = document.querySelector("#candidate-image");
   const imageLink = document.querySelector("#full-image-link");
   const empty = document.querySelector("#empty");
-  const controls = document.querySelectorAll(".actions button, #previous, #skip, #next, #confirm-group, #split-track");
+  const controls = document.querySelectorAll(".actions button, #previous, #skip, #next, #confirm-group, #split-track, .identity-editor button");
   controls.forEach(button => { button.disabled = !candidate; });
   if (!candidate) {
     image.removeAttribute("src");
@@ -88,6 +88,12 @@ function render() {
   showValue("suspected_duplicate_track_ids", candidate.suspected_duplicate_track_ids?.join(", "));
   showValue("candidate_status", candidate.candidate_status);
   showValue("candidate_filter_reasons", candidate.candidate_filter_reasons?.join(", "));
+  showValue("candidate_id", candidate.id);
+  showValue("vehicle_identity_id", candidate.vehicle_identity_id);
+  showValue("vehicle_identity_status", candidate.vehicle_identity_status);
+  showValue("vehicle_identity_evidence", candidate.vehicle_identity_evidence);
+  showValue("vehicle_identity_members", candidate.vehicle_identity_members?.map(item => `${item.filename} [${item.candidate_id}]`).join("；"));
+  showValue("suspected_identity_sources", candidate.suspected_identity_sources?.map(item => `${item.filename} [${item.candidate_id}]`).join("；"));
   showValue("ai_recommendation", candidate.ai_recommendation ? (labelNames[candidate.ai_recommendation] || candidate.ai_recommendation) : "无推荐");
   showValue("ai_similarity", candidate.ai_similarity == null ? null : `${candidate.ai_similarity.toFixed(3)}（非概率）`);
   showValue("ai_top3", candidate.ai_top3?.map(item => `${labelNames[item.label] || item.label}: ${item.score.toFixed(3)}`).join(" · "));
@@ -112,6 +118,28 @@ function render() {
     const preload = new Image();
     preload.src = state.next_image_url;
   }
+  renderEvaluation();
+}
+
+function renderEvaluation() {
+  const evaluation = state?.evaluation?.evaluation;
+  const summary = document.querySelector("#evaluation-summary");
+  const matrix = document.querySelector("#confusion-matrix");
+  const errors = document.querySelector("#evaluation-errors");
+  if (!evaluation) {
+    summary.textContent = "尚未载入评估报告。";
+    matrix.textContent = "—";
+    errors.replaceChildren(Object.assign(document.createElement("li"), {textContent: "—"}));
+    return;
+  }
+  summary.textContent = `Reference ${evaluation.reference_samples} · Calibration ${evaluation.calibration_samples} · Test ${evaluation.validation_samples} · 身份交叉 ${evaluation.identity_overlap.length}`;
+  matrix.textContent = JSON.stringify(evaluation.metrics?.confusion_matrix || {}, null, 2);
+  const items = (evaluation.errors || []).map(error => {
+    const item = document.createElement("li");
+    item.textContent = `${error.true_label} → ${error.predicted_label}：${error.image_path}`;
+    return item;
+  });
+  errors.replaceChildren(...(items.length ? items : [Object.assign(document.createElement("li"), {textContent: "当前没有可显示的错误案例。"})]));
 }
 
 async function updateTrackGroup(action) {
@@ -127,6 +155,26 @@ async function updateTrackGroup(action) {
     });
     if (!response.ok) throw new Error(await response.text());
     document.querySelector("#message").textContent = action === "merge" ? "已确认车辆组合并。" : "已拆分当前轨迹。";
+    await loadState(state.candidate.id);
+  } finally {
+    actionPending = false;
+  }
+}
+
+async function updateVehicleIdentity(action) {
+  if (!state?.candidate || actionPending) return;
+  actionPending = true;
+  try {
+    const candidateIds = document.querySelector("#identity-candidate-ids").value
+      .split(",").map(value => value.trim()).filter(Boolean);
+    const response = await fetch("/api/vehicle-identities", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({candidate_id: state.candidate.id, candidate_ids: candidateIds, action}),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    document.querySelector("#message").textContent = "车辆身份记录已保存。";
+    document.querySelector("#identity-candidate-ids").value = "";
     await loadState(state.candidate.id);
   } finally {
     actionPending = false;
@@ -208,6 +256,10 @@ document.querySelector("#next").addEventListener("click", () => move("next"));
 document.querySelector("#skip").addEventListener("click", () => move("skip"));
 document.querySelector("#confirm-group").addEventListener("click", () => updateTrackGroup("merge").catch(showError));
 document.querySelector("#split-track").addEventListener("click", () => updateTrackGroup("split").catch(showError));
+document.querySelector("#confirm-identity").addEventListener("click", () => updateVehicleIdentity("merge").catch(showError));
+document.querySelector("#split-identity").addEventListener("click", () => updateVehicleIdentity("split").catch(showError));
+document.querySelector("#unknown-identity").addEventListener("click", () => updateVehicleIdentity("unknown").catch(showError));
+document.querySelector("#suspect-identity").addEventListener("click", () => updateVehicleIdentity("suspect").catch(showError));
 document.querySelector("#accept-ai").addEventListener("click", () => {
   if (state?.candidate?.ai_recommendation) annotate(state.candidate.ai_recommendation, "ai_accepted").catch(showError);
 });

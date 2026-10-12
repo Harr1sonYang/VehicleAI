@@ -14,6 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="评估 VehicleAI v0.3 AI 预标注")
     parser.add_argument("--manifest", type=Path, default=Path("data/curated/curated_manifest.jsonl"))
     parser.add_argument("--annotations", type=Path, default=Path("data/annotations/annotations.jsonl"))
+    parser.add_argument("--identities", type=Path, default=Path("data/annotations/vehicle_identities.jsonl"))
     parser.add_argument("--cache", type=Path, default=Path("data/embeddings/dinov2_vits14.npz"))
     parser.add_argument("--hub-cache", type=Path, default=Path("models/torch_hub"))
     parser.add_argument("--output-json", type=Path, default=Path("results/prelabeling/evaluation.json"))
@@ -29,7 +30,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    audit = audit_human_samples(args.manifest, args.annotations)
+    audit = audit_human_samples(args.manifest, args.annotations, identities_path=args.identities)
     extractor = DinoV2Extractor(device=args.device, hub_cache=args.hub_cache, allow_download=not args.offline)
     cache = EmbeddingCache(args.cache, extractor.model_name)
     embeddings, cache_stats = cache.embeddings_for(
@@ -54,8 +55,8 @@ def main() -> None:
         "audit": audit.summary,
         "evaluation": evaluation,
         "reliability_note": (
-            "三类目标车型样本没有可信 vehicle_id/vehicle_group_id/source 字段，无法证明照片来自独立车辆；"
-            "为避免泄漏，它们只作为参考，没有进入验证集。因此这些类别的 Precision/Recall/F1 暂不可靠，不能据此宣称准确率。"
+            "身份不明确或存在近重复泄漏风险的样本只进入参考库，不进入 Calibration/Test。"
+            "状态为 insufficient_data 的类别不报告可泛化准确率，也不使用 Test 调节阈值。"
         ),
     }
     report["settings"]["selected_thresholds"] = evaluation.get("selected_thresholds")
