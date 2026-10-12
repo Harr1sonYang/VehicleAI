@@ -111,6 +111,16 @@ def write_predictions(records: Iterable[dict[str, Any]], output_path: Path) -> i
     return len(materialised)
 
 
+def merge_prediction_records(
+    existing: Iterable[dict[str, Any]], updates: Iterable[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Replace predictions for updated images while retaining other roots."""
+    latest: dict[str, dict[str, Any]] = {}
+    for record in [*existing, *updates]:
+        latest[normalise_path(record["image_path"])] = record
+    return [latest[key] for key in sorted(latest)]
+
+
 def read_predictions(path: Path) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     if not path.is_file():

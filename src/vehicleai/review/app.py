@@ -19,6 +19,7 @@ from vehicleai.classification.curation import (
     discover_candidates,
 )
 from vehicleai.classification.prelabel import read_predictions
+from vehicleai.classification.data_audit import normalise_path
 from vehicleai.classification.identity import VehicleIdentityStore, infer_identity
 from vehicleai.review.groups import TrackGroupStore
 
@@ -80,6 +81,8 @@ def create_app(
     identities_path: Path = Path("data/annotations/vehicle_identities.jsonl"),
     evaluation_path: Path = Path("results/prelabeling/evaluation.json"),
     identity_suggestions_path: Path = Path("data/annotations/identity_suggestions.jsonl"),
+    duplicates_path: Path = Path("data/road_collection/candidate_duplicates.jsonl"),
+    collection_statistics_path: Path = Path("data/road_collection/statistics.json"),
 ) -> Flask:
     """Create the loopback-only review app; the runner controls the bind address."""
     app = Flask(__name__)
@@ -91,6 +94,18 @@ def create_app(
     predictions = read_predictions(Path(predictions_path))
     identity_store = VehicleIdentityStore(Path(identities_path))
     suggestion_store = VehicleIdentityStore(Path(identity_suggestions_path))
+    duplicate_records: dict[str, dict[str, Any]] = {}
+    if Path(duplicates_path).is_file():
+        with Path(duplicates_path).open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    record = json.loads(line)
+                    duplicate_records[normalise_path(record["image_path"])] = record
+    collection_statistics = (
+        json.loads(Path(collection_statistics_path).read_text(encoding="utf-8"))
+        if Path(collection_statistics_path).is_file()
+        else None
+    )
     evaluation = (
         json.loads(Path(evaluation_path).read_text(encoding="utf-8"))
         if Path(evaluation_path).is_file()
@@ -107,6 +122,8 @@ def create_app(
         AI_PREDICTIONS=predictions,
         VEHICLE_IDENTITY_STORE=identity_store,
         EVALUATION_REPORT=evaluation,
+        CROSS_VIDEO_DUPLICATES=duplicate_records,
+        COLLECTION_STATISTICS=collection_statistics,
     )
 
     def inferred_identity(candidate: Candidate):
@@ -128,12 +145,12 @@ def create_app(
         final_label = request.args.get("label", "")
         provider = request.args.get("provider", "")
         candidate_status = request.args.get("candidate_status", "reviewable")
-        sort_order = request.args.get("sort", "default")
+        sort_order = request.args.get("sort", "high_value_first")
         if status not in {"all", "unreviewed", "reviewed"}:
             abort(400, description="无效的审核状态筛选")
         if candidate_status not in {"", "all", "reviewable", "accepted", "suspected_false_positive", "filtered"}:
             abort(400, description="无效的候选质量筛选")
-        if sort_order not in {"default", "uncertain_first"}:
+        if sort_order not in {"default", "uncertain_first", "high_value_first"}:
             abort(400, description="无效的排序方式")
 
         result: list[Candidate] = []
@@ -167,6 +184,29 @@ def create_app(
                     item.key,
                 )
             )
+        elif sort_order == "high_value_first":
+            target_labels = {"charger_target", "explorer_target", "durango_target"}
+
+            def priority(item: Candidate) -> tuple[Any, ...]:
+                prediction = predictions.get(item.key, {})
+                recommendation = prediction.get("ai_recommendation")
+                top_labels = {entry.get("label") for entry in prediction.get("top3", [])}
+                if recommendation in target_labels:
+                    tier = 0
+                elif top_labels & target_labels:
+                    tier = 1
+                elif recommendation in {None, "unknown"}:
+                    tier = 2
+                else:
+                    tier = 3
+                return (
+                    tier,
+                    -float(prediction.get("similarity") or 0.0),
+                    -float(item.quality_score or 0.0),
+                    item.key,
+                )
+
+            result.sort(key=priority)
         return result
 
     def serialise(candidate: Candidate) -> dict[str, Any]:
@@ -186,6 +226,7 @@ def create_app(
             }
         ) if effective_group else list(candidate.group_track_ids)
         prediction = predictions.get(candidate.key)
+        duplicate = duplicate_records.get(candidate.key, {})
         identity = effective_identity(candidate)
         identity_members = [
             {
@@ -224,6 +265,9 @@ def create_app(
             "source": candidate.source,
             "source_id": candidate.source_id,
             "source_video": candidate.source_video,
+            "source_video_id": candidate.source_video_id,
+            "session_id": candidate.session_id,
+            "timestamp_ms": candidate.timestamp_ms,
             "source_page_url": _public_http_url(candidate.source_page_url),
             "frame_number": candidate.frame_number,
             "track_id": candidate.track_id,
@@ -232,6 +276,7 @@ def create_app(
             "association_status": candidate.association_status,
             "suspected_duplicate_track_ids": list(candidate.suspected_duplicate_track_ids),
             "candidate_status": candidate.candidate_status or "accepted",
+            "quality_score": candidate.quality_score,
             "candidate_filter_reasons": list(candidate.candidate_filter_reasons),
             "track_first_frame": candidate.track_first_frame,
             "track_last_frame": candidate.track_last_frame,
@@ -252,6 +297,9 @@ def create_app(
             "vehicle_identity_evidence": identity.evidence,
             "vehicle_identity_members": identity_members,
             "suspected_identity_sources": suspected_sources,
+            "cross_video_duplicate_status": duplicate.get("duplicate_status", "not_indexed"),
+            "cross_video_duplicate_of": duplicate.get("duplicate_of"),
+            "cross_video_duplicate_note": duplicate.get("note"),
         }
 
     @app.get("/")
@@ -329,6 +377,7 @@ def create_app(
                     "candidate_statuses": ["reviewable", "accepted", "suspected_false_positive", "filtered", "all"],
                 },
                 "evaluation": evaluation,
+                "collection_statistics": collection_statistics,
             }
         )
 

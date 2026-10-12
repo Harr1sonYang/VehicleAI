@@ -51,6 +51,10 @@ class Candidate:
     candidate_filter_reasons: tuple[str, ...] = ()
     track_first_frame: int | None = None
     track_last_frame: int | None = None
+    session_id: str | None = None
+    source_video_id: str | None = None
+    timestamp_ms: float | None = None
+    quality_score: float | None = None
 
     @property
     def key(self) -> str:
@@ -179,6 +183,10 @@ def discover_candidates(root: Path) -> list[Candidate]:
                 candidate_filter_reasons=tuple(record.get("candidate_filter_reasons") or ()),
                 track_first_frame=track_statistics.get("first_frame"),
                 track_last_frame=track_statistics.get("last_frame"),
+                session_id=record.get("session_id"),
+                source_video_id=record.get("source_video_id"),
+                timestamp_ms=record.get("timestamp_ms"),
+                quality_score=record.get("quality_score"),
             )
         )
     return result

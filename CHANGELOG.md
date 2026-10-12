@@ -2,7 +2,31 @@
 
 All notable VehicleAI changes are documented here. Versions follow Semantic Versioning where a recoverable release commit exists.
 
-## [0.3.1] - Unreleased
+## [0.3.2] - Unreleased
+
+### Added
+
+- Content-addressed MP4/MOV/AVI/MKV/WebM inbox scanning with a durable SQLite processing queue.
+- Queue progress/status reporting, bounded automatic retry, interruption recovery, and stable per-video session IDs.
+- A one-command road-video pipeline that reuses YOLO, ByteTrack, representative-frame selection, quality filtering, and cached DINOv2 pre-labeling.
+- Cross-video exact and perceptual near-duplicate indexing that records evidence without asserting vehicle identity.
+- Collection statistics for videos, queue status, tracks, candidates, human labels, and strict-validation identities.
+- High-value reviewer ordering that prioritizes predicted target vehicles while retaining Other and Unknown candidates.
+- Tests for queue recovery, content deduplication, collection statistics, batch metadata, and review priority.
+
+### Safety
+
+- Source videos are never moved, modified, or deleted.
+- Failed partial outputs are preserved outside the review candidate root before retry.
+- Content similarity and cross-video duplication never automatically merge real-world vehicle identities.
+- AI predictions remain separate from append-only human annotations.
+
+### Known limitations
+
+- The MVP processes one queued video at a time; it does not run concurrent GPU workers.
+- Queue progress is stage-level. Per-frame progress remains visible in the active process rather than persisted for every decoded frame.
+
+## [0.3.1] - 2026-10-12
 
 ### Added
 

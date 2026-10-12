@@ -1,0 +1,12 @@
+# VehicleAI v0.3.2 road-collection defaults. The command-line entry point uses
+# these same paths so the first run needs no arguments.
+inbox: data/incoming/videos
+candidate_root: data/candidates/road
+queue_database: data/road_collection/queue.sqlite3
+duplicate_index: data/road_collection/candidate_duplicates.jsonl
+statistics: data/road_collection/statistics.json
+supported_video_extensions: [.mp4, .mov, .avi, .mkv, .webm]
+max_attempts: 3
+frame_stride: 1
+prelabel_after_batch: true
+prelabel_offline: true

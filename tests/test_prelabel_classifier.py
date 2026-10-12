@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vehicleai.classification.prelabel import BalancedKNNClassifier
+from vehicleai.classification.prelabel import BalancedKNNClassifier, merge_prediction_records
 
 
 def test_balanced_class_scoring_is_not_dominated_by_other_count(tmp_path: Path) -> None:
@@ -29,3 +29,17 @@ def test_classifier_abstains_on_low_margin() -> None:
     result = classifier.predict_one(np.asarray([1.0, 0.02], dtype=np.float32))
     assert result.predicted_label == "unknown"
     assert len(result.top3) == 2
+
+
+def test_incremental_predictions_replace_only_matching_image(tmp_path: Path) -> None:
+    first = tmp_path / "first.jpg"
+    second = tmp_path / "second.jpg"
+    existing = [
+        {"image_path": str(first), "ai_recommendation": "other"},
+        {"image_path": str(second), "ai_recommendation": "explorer_target"},
+    ]
+    updates = [{"image_path": str(first), "ai_recommendation": "charger_target"}]
+    merged = merge_prediction_records(existing, updates)
+    by_name = {Path(item["image_path"]).name: item for item in merged}
+    assert by_name["first.jpg"]["ai_recommendation"] == "charger_target"
+    assert by_name["second.jpg"]["ai_recommendation"] == "explorer_target"

@@ -80,6 +80,9 @@ function render() {
   showValue("source", candidate.source);
   showValue("source_id", candidate.source_id);
   showValue("source_video", candidate.source_video);
+  showValue("source_video_id", candidate.source_video_id);
+  showValue("session_id", candidate.session_id);
+  showValue("timestamp_ms", candidate.timestamp_ms == null ? null : `${(candidate.timestamp_ms / 1000).toFixed(3)} 秒`);
   showValue("frame_number", candidate.frame_number);
   showValue("track_id", candidate.track_id);
   showValue("vehicle_group_id", candidate.vehicle_group_id);
@@ -87,6 +90,9 @@ function render() {
   showValue("association_status", candidate.association_status);
   showValue("suspected_duplicate_track_ids", candidate.suspected_duplicate_track_ids?.join(", "));
   showValue("candidate_status", candidate.candidate_status);
+  showValue("quality_score", candidate.quality_score == null ? null : candidate.quality_score.toFixed(3));
+  showValue("cross_video_duplicate_status", candidate.cross_video_duplicate_status);
+  showValue("cross_video_duplicate_of", candidate.cross_video_duplicate_of);
   showValue("candidate_filter_reasons", candidate.candidate_filter_reasons?.join(", "));
   showValue("candidate_id", candidate.id);
   showValue("vehicle_identity_id", candidate.vehicle_identity_id);

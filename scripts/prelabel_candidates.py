@@ -10,7 +10,9 @@ from vehicleai.classification.data_audit import audit_human_samples
 from vehicleai.classification.embeddings import DinoV2Extractor, EmbeddingCache
 from vehicleai.classification.prelabel import (
     BalancedKNNClassifier,
+    merge_prediction_records,
     prediction_record,
+    read_predictions,
     write_predictions,
 )
 
@@ -30,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--similarity-threshold", type=float, default=0.55)
     parser.add_argument("--margin-threshold", type=float, default=0.02)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument(
+        "--merge-existing",
+        action="store_true",
+        help="Retain predictions belonging to candidate roots not included in this run",
+    )
     return parser.parse_args()
 
 
@@ -66,8 +73,11 @@ def main() -> None:
         prediction_record(candidate.image_path, prediction, model_name=extractor.model_name)
         for candidate, prediction in zip(candidate_list, predictions)
     ]
-    count = write_predictions(records, args.output)
-    print(f"未审核候选：{len(candidate_list)}；写入预测：{count}")
+    output_records = records
+    if args.merge_existing:
+        output_records = merge_prediction_records(read_predictions(args.output).values(), records)
+    count = write_predictions(output_records, args.output)
+    print(f"未审核候选：{len(candidate_list)}；本次生成：{len(records)}；预测总数：{count}")
     print(f"预测文件：{args.output.resolve()}（人工标注未被修改）")
 
 

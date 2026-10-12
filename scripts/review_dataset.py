@@ -48,6 +48,18 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/predictions/prelabels.jsonl"),
         help="AI 预标注 JSONL 路径",
     )
+    parser.add_argument(
+        "--duplicates",
+        type=Path,
+        default=Path("data/road_collection/candidate_duplicates.jsonl"),
+        help="跨视频精确／近重复索引",
+    )
+    parser.add_argument(
+        "--collection-statistics",
+        type=Path,
+        default=Path("data/road_collection/statistics.json"),
+        help="道路视频批处理统计 JSON",
+    )
     return parser.parse_args()
 
 
@@ -63,6 +75,8 @@ def main() -> None:
         identities_path=args.identities,
         evaluation_path=args.evaluation,
         identity_suggestions_path=args.identity_suggestions,
+        duplicates_path=args.duplicates,
+        collection_statistics_path=args.collection_statistics,
     )
     count = len(app.config["CANDIDATES"])
     print(f"已发现 {count} 张候选图片")

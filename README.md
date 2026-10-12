@@ -16,8 +16,9 @@ The exact v0.1.0 snapshot is preserved by tag `v0.1.0`. The v0.2.0 and v0.2.1
 milestones were developed in one uncommitted working tree, so no misleading
 historical tags are created for them. Their functionality and recovery status
 are recorded in the changelog. Version v0.3.0 is the first exact, tested
-post-v0.1 snapshot. Current v0.3.1 work is developed on
-`feature/v0.3.1-validation` and is not merged into `main` automatically.
+post-v0.1 snapshot. Version v0.3.1 is preserved by tag `v0.3.1`. Current
+v0.3.2 work is developed on `feature/v0.3.2-road-collection` and is not merged
+into `main` automatically.
 
 ## Current scope
 
@@ -256,6 +257,71 @@ and suspected duplicates. Reviewers can confirm a merge or split the current
 track; these decisions append to `data/annotations/track_groups.jsonl` without
 rewriting tracking metadata. The API rejects manual merges when known track
 frame ranges overlap.
+
+## v0.3.2: one-command road-video collection
+
+Create the inbox once, then place any MP4, MOV, AVI, MKV, or WebM dashcam files
+under `data/incoming/videos/`. Subfolders are supported. From the project root,
+the normal workflow is one command:
+
+```powershell
+python scripts/process_road_videos.py
+```
+
+The command scans for new video content, queues only files that have not
+already been processed, runs the existing YOLO + ByteTrack pipeline, selects
+representative crops, applies the existing candidate-quality checks, indexes
+cross-video exact/near duplicates, updates collection statistics, and runs the
+cached DINOv2 pre-labeler. Original videos are read-only and remain in the
+inbox. Start the reviewer afterwards with:
+
+```powershell
+python scripts/review_dataset.py --root data/candidates/road
+```
+
+The review page opens with target-body candidates first, followed by samples
+whose Top-3 contains a target, uncertain/unknown samples, and Other. No samples
+are discarded by this ordering; Other and Unknown remain available for normal
+review and quality-control sampling. Similarity remains supporting evidence,
+not a real-world vehicle identity claim.
+
+For a deliberately small first run, limit both videos and decoded frames:
+
+```powershell
+python scripts/process_road_videos.py --max-videos 1 --max-frames 300
+```
+
+Inspect queue and collection totals without processing video:
+
+```powershell
+python scripts/process_road_videos.py --status-only
+```
+
+Queue state is stored in `data/road_collection/queue.sqlite3`. It records the
+source path, content SHA-256, stable session ID, stage, attempt count, output,
+timestamps, and last error. A later run recovers interrupted work. Failed jobs
+are retried up to three times by default, while partial generated output is
+preserved under `data/road_collection/failed/`. Source videos and human
+annotations are never deleted or overwritten.
+
+Each selected candidate retains the source video and content ID, session ID,
+video timestamp, frame, original Track ID, vehicle group, detection confidence,
+bounding box, quality score/status, and filtering evidence. DINOv2 predictions
+remain separately stored in `data/predictions/prelabels.jsonl`, including
+Top-3 scores, margin, and nearest reference image.
+
+Cross-video content results are written to
+`data/road_collection/candidate_duplicates.jsonl`. Exact and perceptual-near
+matches are flags only: they do not merge `vehicle_identity` records. Aggregate
+video, queue, track, candidate, human-label, and strict-identity counts are
+written to `data/road_collection/statistics.json`. All of these local data
+files remain excluded from Git.
+
+Defaults are in `configs/road_collection.yaml`. Useful overrides include
+`--device cpu`, `--frame-stride 2`, `--max-attempts 5`, `--no-retry-failed`,
+`--skip-prelabel`, and `--no-offline` for the first permitted DINOv2 download.
+Normal repeated runs should remain offline and reuse the existing model and
+embedding cache.
 
 ## v0.3.1: vehicle identity and strict validation
 

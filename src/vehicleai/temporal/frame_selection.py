@@ -34,12 +34,16 @@ class SelectionRecord:
     candidate_filter_reasons: list[str] = field(default_factory=list)
     track_statistics: dict[str, Any] = field(default_factory=dict)
     secondary_verification: dict[str, Any] = field(default_factory=dict)
+    session_id: str | None = None
+    source_video_id: str | None = None
     _thumbnail: Any = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
             "source_video": self.source,
+            "session_id": self.session_id,
+            "source_video_id": self.source_video_id,
             "timestamp_ms": self.timestamp_ms,
             "timestamp_seconds": self.timestamp_ms / 1000.0,
             "frame_index": self.frame_index,
@@ -138,6 +142,8 @@ class FrameSelector:
         frame_index: int,
         timestamp_ms: float,
         padding: float = 0.0,
+        session_id: str | None = None,
+        source_video_id: str | None = None,
     ) -> SelectionRecord:
         crop = crop_tracked_detection(frame, detection, padding)
         crop_height, crop_width = crop.shape[:2]
@@ -156,6 +162,8 @@ class FrameSelector:
             sharpness=sharpness,
             area_ratio=area_ratio,
             quality_score=quality_score,
+            session_id=session_id,
+            source_video_id=source_video_id,
             _thumbnail=cv2.resize(crop, (self.thumbnail_size, self.thumbnail_size)),
         )
         self.records.append(record)

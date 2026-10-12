@@ -38,6 +38,8 @@ data/annotations/*
 data/curated/*
 !data/curated/.gitkeep
 data/processed/*
+data/incoming/*
+data/road_collection/*
 data/embeddings/*
 data/predictions/*
 data/**/*.jsonl

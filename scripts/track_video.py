@@ -31,6 +31,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="auto", help="auto, cpu, 0, 1, ...")
     parser.add_argument("--frame-stride", type=int, default=1)
     parser.add_argument("--max-frames", type=int, default=0)
+    parser.add_argument("--session-id", help="Stable recording-session identifier")
+    parser.add_argument("--source-video-id", help="Stable content hash used by the batch queue")
     parser.add_argument("--save-annotated-video", action="store_true")
     parser.add_argument("--show", action="store_true", help="Show live tracking; press q to stop")
     return parser.parse_args()
@@ -116,6 +118,8 @@ def main() -> int:
                         frame_index=frame_index,
                         timestamp_ms=timestamp_ms,
                         padding=float(tracker.config.get("crop_padding", 0.0)),
+                        session_id=args.session_id,
+                        source_video_id=args.source_video_id,
                     )
                 sampled_frames += 1
             if writer is not None:
@@ -235,6 +239,8 @@ def main() -> int:
     group_link_count = sum(max(0, len(members) - 1) for members in associations.group_members.values())
     summary = {
         "source": str(args.source),
+        "session_id": args.session_id,
+        "source_video_id": args.source_video_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "device": tracker.device,
         "processed_frames": processed_frames,

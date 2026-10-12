@@ -67,3 +67,20 @@ def test_metadata_defaults_to_unknown_and_unreviewed() -> None:
     assert metadata["bbox_xyxy"] == [0, 0, 100, 100]
     assert metadata["assigned_class"] == "unknown"
     assert metadata["review_status"] == "unreviewed"
+
+
+def test_metadata_preserves_batch_session_and_video_identity() -> None:
+    selector = FrameSelector(min_sharpness=0)
+    record = selector.consider(
+        textured_frame(10),
+        detection(track_id=8),
+        source="drive.mov",
+        frame_index=4,
+        timestamp_ms=160,
+        session_id="drive-a1b2c3",
+        source_video_id="a" * 64,
+    )
+    metadata = record.to_dict()
+    assert metadata["session_id"] == "drive-a1b2c3"
+    assert metadata["source_video_id"] == "a" * 64
+    assert metadata["quality_score"] > 0
