@@ -18,6 +18,24 @@ def parse_args() -> argparse.Namespace:
         help="候选图片目录；可重复指定。默认自动检查项目内三个受支持目录。",
     )
     parser.add_argument(
+        "--identities",
+        type=Path,
+        default=Path("data/annotations/vehicle_identities.jsonl"),
+        help="追加式车辆身份确认记录路径",
+    )
+    parser.add_argument(
+        "--evaluation",
+        type=Path,
+        default=Path("results/prelabeling/evaluation.json"),
+        help="严格验证评估 JSON 路径",
+    )
+    parser.add_argument(
+        "--identity-suggestions",
+        type=Path,
+        default=Path("data/annotations/identity_suggestions.jsonl"),
+        help="跨来源疑似同车候选 JSONL 路径",
+    )
+    parser.add_argument(
         "--annotations",
         type=Path,
         default=Path("data/annotations/annotations.jsonl"),
@@ -38,7 +56,14 @@ def main() -> None:
     if not 1 <= args.port <= 65535:
         raise SystemExit("--port 必须在 1 到 65535 之间")
     roots = args.roots or list(DEFAULT_DATASET_ROOTS)
-    app = create_app(roots, args.annotations, predictions_path=args.predictions)
+    app = create_app(
+        roots,
+        args.annotations,
+        predictions_path=args.predictions,
+        identities_path=args.identities,
+        evaluation_path=args.evaluation,
+        identity_suggestions_path=args.identity_suggestions,
+    )
     count = len(app.config["CANDIDATES"])
     print(f"已发现 {count} 张候选图片")
     print(f"审核地址：http://127.0.0.1:{args.port}")

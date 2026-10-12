@@ -76,6 +76,12 @@
         <dt>疑似重复</dt><dd data-field="suspected_duplicate_track_ids">—</dd>
         <dt>候选质量</dt><dd data-field="candidate_status">—</dd>
         <dt>过滤原因</dt><dd data-field="candidate_filter_reasons">—</dd>
+        <dt>候选 ID</dt><dd data-field="candidate_id">—</dd>
+        <dt>车辆身份</dt><dd data-field="vehicle_identity_id">—</dd>
+        <dt>身份状态</dt><dd data-field="vehicle_identity_status">—</dd>
+        <dt>身份证据</dt><dd data-field="vehicle_identity_evidence">—</dd>
+        <dt>身份组图片</dt><dd data-field="vehicle_identity_members">—</dd>
+        <dt>疑似同车来源</dt><dd data-field="suspected_identity_sources">—</dd>
       </dl>
       <a id="source-link" class="source-link" target="_blank" rel="noopener noreferrer" hidden>打开来源页面</a>
       <section class="ai-panel">
@@ -101,8 +107,30 @@
           <button id="split-track">拆分当前 Track</button>
         </div>
       </section>
+      <section class="identity-editor">
+        <h3>真实车辆身份（独立于轨迹组）</h3>
+        <label>其他候选 ID（逗号分隔）
+          <input id="identity-candidate-ids" type="text">
+        </label>
+        <div>
+          <button id="confirm-identity">确认同一车辆</button>
+          <button id="split-identity">拆分当前图片</button>
+          <button id="unknown-identity">标记身份未知</button>
+          <button id="suspect-identity">仅标记疑似重复</button>
+        </div>
+        <p>轨迹关联和外观相似不等于真实身份；跨来源合并必须人工确认。</p>
+      </section>
     </aside>
   </main>
+
+  <section class="evaluation-panel">
+    <h2>严格身份隔离评估</h2>
+    <p id="evaluation-summary">尚未载入评估报告。</p>
+    <h3>混淆矩阵</h3>
+    <pre id="confusion-matrix">—</pre>
+    <h3>错误案例</h3>
+    <ul id="evaluation-errors"><li>—</li></ul>
+  </section>
 
   <section class="actions" aria-label="标注操作">
     <button data-label="charger_target"><kbd>1</kbd> Charger 目标</button>
@@ -119,6 +147,6 @@
     <span id="message" role="status"></span>
   </section>
 
-  <script src="{{ url_for('static', filename='review.js', v=6) }}"></script>
+  <script src="{{ url_for('static', filename='review.js', v=7) }}"></script>
 </body>
 </html>

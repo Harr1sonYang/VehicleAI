@@ -279,3 +279,39 @@ def test_ai_prediction_is_separate_visible_and_accept_requires_explicit_action(t
     )
     assert blocked.status_code == 409
     assert len(annotations.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_vehicle_identity_merge_split_and_suspected_duplicate(tmp_path: Path) -> None:
+    root = tmp_path / "candidates"
+    make_candidate(root, "one.jpg")
+    make_candidate(root, "two.jpg")
+    identities = tmp_path / "vehicle_identities.jsonl"
+    client = create_app(
+        [root],
+        tmp_path / "annotations.jsonl",
+        identities_path=identities,
+        evaluation_path=tmp_path / "missing-evaluation.json",
+    ).test_client()
+    first = client.get("/api/state?status=all").get_json()["candidate"]
+    second_id = client.get(f"/api/state?status=all&candidate_id={first['id']}").get_json()["navigation"]["next_id"]
+    suspected = client.post(
+        "/api/vehicle-identities",
+        json={"candidate_id": first["id"], "candidate_ids": [second_id], "action": "suspect"},
+    )
+    assert suspected.status_code == 200
+    assert client.get(f"/api/state?status=all&candidate_id={first['id']}").get_json()["candidate"]["vehicle_identity_status"] == "unknown_identity"
+    merged = client.post(
+        "/api/vehicle-identities",
+        json={"candidate_id": first["id"], "candidate_ids": [second_id], "action": "merge"},
+    )
+    assert merged.status_code == 200
+    merged_state = client.get(f"/api/state?status=all&candidate_id={first['id']}").get_json()["candidate"]
+    assert merged_state["vehicle_identity_status"] == "confirmed"
+    assert len(merged_state["vehicle_identity_members"]) == 2
+    split = client.post(
+        "/api/vehicle-identities", json={"candidate_id": first["id"], "action": "split"}
+    )
+    assert split.status_code == 200
+    split_state = client.get(f"/api/state?status=all&candidate_id={first['id']}").get_json()["candidate"]
+    assert len(split_state["vehicle_identity_members"]) == 1
+    assert len(identities.read_text(encoding="utf-8").splitlines()) == 3

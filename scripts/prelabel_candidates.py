@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", action="append", type=Path, dest="roots")
     parser.add_argument("--manifest", type=Path, default=Path("data/curated/curated_manifest.jsonl"))
     parser.add_argument("--annotations", type=Path, default=Path("data/annotations/annotations.jsonl"))
+    parser.add_argument("--identities", type=Path, default=Path("data/annotations/vehicle_identities.jsonl"))
     parser.add_argument("--cache", type=Path, default=Path("data/embeddings/dinov2_vits14.npz"))
     parser.add_argument("--hub-cache", type=Path, default=Path("models/torch_hub"))
     parser.add_argument("--output", type=Path, default=Path("data/predictions/prelabels.jsonl"))
@@ -35,7 +36,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     roots = args.roots or [Path("data/raw/web"), Path("data/raw/video_candidates"), Path("data/candidates")]
-    audit = audit_human_samples(args.manifest, args.annotations)
+    audit = audit_human_samples(args.manifest, args.annotations, identities_path=args.identities)
     annotations = AnnotationStore(args.annotations).latest
     candidates = {}
     for root in roots:

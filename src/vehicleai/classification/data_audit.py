@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from PIL import Image, UnidentifiedImageError
 
 from .curation import AnnotationStore
+from .identity import VehicleIdentityStore, infer_identity
 from .manifest import read_curated_manifest
 
 TRAINING_LABELS = ("charger_target", "explorer_target", "durango_target", "other")
@@ -56,6 +57,9 @@ class AuditedSample:
     source_video: str | None = None
     track_id: int | str | None = None
     vehicle_group_id: str | None = None
+    identity_status: str = "unknown_identity"
+    identity_evidence: str = "insufficient_identity_evidence"
+    identity_subject: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         record = asdict(self)
@@ -86,27 +90,12 @@ class _DisjointSet:
             self.parent[right_root] = left_root
 
 
-def _identity(annotation: dict[str, Any], record: dict[str, Any], label: str) -> tuple[str, bool]:
-    source_video = annotation.get("source_video") or record.get("source_video")
-    vehicle_group = annotation.get("vehicle_group_id") or record.get("vehicle_group_id")
-    vehicle_id = annotation.get("vehicle_id") or record.get("vehicle_id")
-    track_id = annotation.get("track_id", record.get("track_id"))
-    if vehicle_group:
-        return f"vehicle-group:{source_video or 'unknown'}:{vehicle_group}", True
-    if vehicle_id:
-        return f"vehicle-id:{vehicle_id}", True
-    if source_video and track_id is not None:
-        return f"track:{source_video}:{track_id}", True
-    # These records may still be used as references, but never split across a
-    # reference/validation boundary as if each image represented a new vehicle.
-    return f"unverified-identity:{label}", False
-
-
 def audit_human_samples(
     manifest_path: Path,
     annotations_path: Path,
     *,
     near_duplicate_distance: int = 2,
+    identities_path: Path = Path("data/annotations/vehicle_identities.jsonl"),
 ) -> AuditResult:
     """Return only existing, manually reviewed four-class images.
 
@@ -116,6 +105,7 @@ def audit_human_samples(
     """
     manifest = read_curated_manifest(manifest_path)
     latest = AnnotationStore(annotations_path).latest
+    identity_store = VehicleIdentityStore(identities_path)
     excluded: list[dict[str, Any]] = []
     raw: list[dict[str, Any]] = []
 
@@ -144,17 +134,33 @@ def audit_human_samples(
         except (OSError, UnidentifiedImageError) as error:
             excluded.append({"image_path": str(path), "reason": f"unreadable_image:{type(error).__name__}"})
             continue
-        identity, confirmed = _identity(annotation, record, label)
+        source_video = annotation.get("source_video") or record.get("source_video")
+        track_id = annotation.get("track_id", record.get("track_id"))
+        inferred = infer_identity(
+            image_path=path,
+            source_video=source_video,
+            track_id=track_id,
+            vehicle_id=annotation.get("vehicle_id") or record.get("vehicle_id"),
+            provider=annotation.get("provider") or record.get("provider"),
+            source_id=annotation.get("source_id") or record.get("source_id"),
+            source_identity_confirmed=bool(
+                annotation.get("source_identity_confirmed") or record.get("source_identity_confirmed")
+            ),
+        )
+        identity = identity_store.resolve(inferred, path)
         raw.append(
             {
                 "path": path,
                 "label": label,
                 "sha256": str(sha256).lower(),
                 "dhash": str(dhash).lower(),
-                "identity": identity,
-                "confirmed": confirmed,
-                "source_video": annotation.get("source_video") or record.get("source_video"),
-                "track_id": annotation.get("track_id", record.get("track_id")),
+                "identity": identity.vehicle_identity_id,
+                "identity_status": identity.status,
+                "identity_evidence": identity.evidence,
+                "identity_subject": identity.subject_key,
+                "confirmed": identity.status == "confirmed",
+                "source_video": source_video,
+                "track_id": track_id,
                 "vehicle_group_id": annotation.get("vehicle_group_id") or record.get("vehicle_group_id"),
             }
         )
@@ -212,7 +218,8 @@ def audit_human_samples(
         group_token = hashlib.sha256(
             "|".join(sorted(raw[index]["identity"] for index in member_indices)).encode("utf-8")
         ).hexdigest()[:16]
-        group_confirmed = all(raw[index]["confirmed"] for index in member_indices)
+        identity_ids = {raw[index]["identity"] for index in member_indices}
+        group_confirmed = all(raw[index]["confirmed"] for index in member_indices) and len(identity_ids) == 1
         for index in sorted(member_indices, key=lambda value: str(raw[value]["path"]).casefold()):
             item = raw[index]
             if item["sha256"] in seen_hashes:
@@ -231,12 +238,19 @@ def audit_human_samples(
                     source_video=item["source_video"],
                     track_id=item["track_id"],
                     vehicle_group_id=item["vehicle_group_id"],
+                    identity_status="confirmed" if group_confirmed else "unknown_identity",
+                    identity_evidence=item["identity_evidence"],
+                    identity_subject=item["identity_subject"],
                 )
             )
 
     samples.sort(key=lambda sample: str(sample.image_path).casefold())
     counts = Counter(sample.label for sample in samples)
     confirmed_groups = {sample.identity_group for sample in samples if sample.identity_confirmed}
+    confirmed_by_label = {
+        label: len({sample.identity_group for sample in samples if sample.identity_confirmed and sample.label == label})
+        for label in TRAINING_LABELS
+    }
     summary = {
         "manifest_rows": len(manifest),
         "eligible_rows_before_deduplication": len(raw),
@@ -246,6 +260,7 @@ def audit_human_samples(
         "exact_duplicate_rows_removed": duplicate_rows,
         "conflicting_duplicate_rows_removed": conflict_rows,
         "confirmed_identity_groups": len(confirmed_groups),
+        "confirmed_identity_groups_by_label": confirmed_by_label,
         "unconfirmed_identity_rows": sum(not sample.identity_confirmed for sample in samples),
         "validation_warning": (
             "Samples without a confirmed vehicle/session identity are reference-only and are not used as independent validation examples."

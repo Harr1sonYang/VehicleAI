@@ -2,12 +2,15 @@ model: dinov2_vits14
 device: auto
 batch_size: 16
 k_per_class: 3
-similarity_threshold: 0.55
-margin_threshold: 0.02
+similarity_threshold: 0.75
+margin_threshold: 0.08
 near_duplicate_hamming_distance: 2
 validation_fraction: 0.20
 hub_cache: models/torch_hub
 embedding_cache: data/embeddings/dinov2_vits14.npz
 predictions: data/predictions/prelabels.jsonl
+blind_predictions: data/predictions/blind_test.jsonl
+vehicle_identities: data/annotations/vehicle_identities.jsonl
+identity_suggestions: data/annotations/identity_suggestions.jsonl
 evaluation_json: results/prelabeling/evaluation.json
 evaluation_markdown: results/prelabeling/evaluation.md
